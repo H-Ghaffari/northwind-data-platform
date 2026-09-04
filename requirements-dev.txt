@@ -1,0 +1,6 @@
+# Local development environment — mirrors the container runtime.
+pyspark==3.5.1
+pandas==2.1.4
+psycopg2-binary
+pymssql
+clickhouse-connect

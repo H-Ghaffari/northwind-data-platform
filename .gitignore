@@ -1,0 +1,28 @@
+cat > .gitignore << 'EOF'
+# Secrets — never commit real credentials
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Airflow runtime artefacts
+airflow/logs/
+airflow.db
+airflow.cfg
+webserver_config.py
+
+# Large binaries
+*.bak
+*.rar
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+EOF
