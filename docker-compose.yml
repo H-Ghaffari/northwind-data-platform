@@ -83,7 +83,7 @@ services:
       - "${OP_EXTERNAL_PORT}:1433"
     volumes:
       - op_data:/var/opt/mssql
-      - ./sql/01_op:/opt/sql/01_op:ro
+      - ./sql:/opt/sql:ro 
     mem_limit: 2g
     networks:
       - northwind_net
