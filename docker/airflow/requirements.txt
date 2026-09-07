@@ -1,0 +1,11 @@
+# Transformation engine
+pyspark==3.5.1
+
+# Source / target connectivity
+apache-airflow-providers-microsoft-mssql
+apache-airflow-providers-postgres
+pymssql
+psycopg2-binary
+
+# ClickHouse is loaded through its HTTP interface rather than JDBC
+clickhouse-connect

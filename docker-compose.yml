@@ -1,0 +1,265 @@
+name: northwind-data-platform
+
+# ---------------------------------------------------------------------------
+# Northwind Data Platform — Batch pipeline (Airflow method)
+#
+#   OP (SQL Server) --> Staging (PostgreSQL) --> DW (ClickHouse) --> Grafana
+#                              orchestrated by Airflow
+# ---------------------------------------------------------------------------
+
+networks:
+  northwind_net:
+    driver: bridge
+
+volumes:
+  op_data:
+  staging_data:
+  airflow_meta_data:
+  dw_data:
+  grafana_data:
+
+# Shared configuration for every Airflow service, declared once.
+x-airflow-common: &airflow-common
+  build:
+    context: ./docker/airflow
+    dockerfile: Dockerfile
+  image: northwind/airflow:2.9.3
+  environment: &airflow-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__CORE__DEFAULT_TIMEZONE: ${AIRFLOW_TIMEZONE}
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: >-
+      postgresql+psycopg2://${AIRFLOW_META_USER}:${AIRFLOW_META_PASSWORD}@airflow_meta:5432/${AIRFLOW_META_DB}
+    AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "true"
+    AIRFLOW__WEBSERVER__DEFAULT_UI_TIMEZONE: ${AIRFLOW_TIMEZONE}
+    AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: "true"
+
+    # --- Connection details consumed by our own DAG code ---
+    OP_HOST: northwind_op
+    OP_PORT: "1433"
+    OP_DB: ${OP_DB}
+    OP_USER: sa
+    OP_PASSWORD: ${MSSQL_SA_PASSWORD}
+
+    STAGING_HOST: northwind_staging
+    STAGING_PORT: "5432"
+    STAGING_DB: ${STAGING_DB}
+    STAGING_USER: ${STAGING_USER}
+    STAGING_PASSWORD: ${STAGING_PASSWORD}
+
+    DW_HOST: northwind_dw
+    DW_HTTP_PORT: "8123"
+    DW_DB: ${DW_DB}
+    DW_USER: ${CLICKHOUSE_USER}
+    DW_PASSWORD: ${CLICKHOUSE_PASSWORD}
+
+    JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
+    SPARK_JARS_DIR: /opt/spark-jars
+  volumes:
+    - ./airflow/dags:/opt/airflow/dags
+    - ./airflow/plugins:/opt/airflow/plugins
+    - ./airflow/logs:/opt/airflow/logs
+    - ./spark:/opt/spark-jobs
+    - ./sql:/opt/sql
+  user: "${AIRFLOW_UID:-50000}:0"
+  networks:
+    - northwind_net
+
+services:
+
+  # -------------------------------------------------------------------------
+  # OP layer — the operational source system (Northwind + ETL_Settings)
+  # -------------------------------------------------------------------------
+  northwind_op:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: northwind_op
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD}
+      MSSQL_PID: Developer
+      MSSQL_AGENT_ENABLED: "true"   # required for CDC capture jobs
+    ports:
+      - "${OP_EXTERNAL_PORT}:1433"
+    volumes:
+      - op_data:/var/opt/mssql
+      - ./sql/01_op:/opt/sql/01_op:ro
+    mem_limit: 2g
+    networks:
+      - northwind_net
+    restart: unless-stopped
+    healthcheck:
+      test: >-
+        /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa
+        -P "${MSSQL_SA_PASSWORD}" -C -Q "SELECT 1" -b -o /dev/null
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+
+  # -------------------------------------------------------------------------
+  # Staging layer — integration area, truncated and refilled on every run
+  # -------------------------------------------------------------------------
+  northwind_staging:
+    image: postgres:15
+    container_name: northwind_staging
+    environment:
+      POSTGRES_USER: ${STAGING_USER}
+      POSTGRES_PASSWORD: ${STAGING_PASSWORD}
+      POSTGRES_DB: ${STAGING_DB}
+    ports:
+      - "${STAGING_EXTERNAL_PORT}:5432"
+    volumes:
+      - staging_data:/var/lib/postgresql/data
+    mem_limit: 1g
+    networks:
+      - northwind_net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${STAGING_USER} -d ${STAGING_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # -------------------------------------------------------------------------
+  # Airflow metadata database — deliberately separate from business data
+  # -------------------------------------------------------------------------
+  airflow_meta:
+    image: postgres:15
+    container_name: airflow_meta
+    environment:
+      POSTGRES_USER: ${AIRFLOW_META_USER}
+      POSTGRES_PASSWORD: ${AIRFLOW_META_PASSWORD}
+      POSTGRES_DB: ${AIRFLOW_META_DB}
+    volumes:
+      - airflow_meta_data:/var/lib/postgresql/data
+    mem_limit: 512m
+    networks:
+      - northwind_net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${AIRFLOW_META_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # -------------------------------------------------------------------------
+  # DW layer — the star schema, optimised for reporting
+  # -------------------------------------------------------------------------
+  northwind_dw:
+    image: clickhouse/clickhouse-server:latest
+    container_name: northwind_dw
+    environment:
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+      CLICKHOUSE_DB: ${DW_DB}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    ports:
+      - "${DW_HTTP_EXTERNAL_PORT}:8123"   # HTTP  — Grafana, clickhouse-connect
+      - "${DW_NATIVE_EXTERNAL_PORT}:9000" # native — clickhouse-client
+    volumes:
+      - dw_data:/var/lib/clickhouse
+      - ./sql/03_dw:/docker-entrypoint-initdb.d:ro
+    mem_limit: 2g
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    networks:
+      - northwind_net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # -------------------------------------------------------------------------
+  # Airflow — one-shot initialisation (migrations + admin user)
+  # -------------------------------------------------------------------------
+  airflow_init:
+    <<: *airflow-common
+    container_name: airflow_init
+    depends_on:
+      airflow_meta:
+        condition: service_healthy
+    environment:
+      <<: *airflow-env
+      _AIRFLOW_DB_MIGRATE: "true"
+      _AIRFLOW_WWW_USER_CREATE: "true"
+      _AIRFLOW_WWW_USER_USERNAME: ${AIRFLOW_ADMIN_USER}
+      _AIRFLOW_WWW_USER_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD}
+    user: "0:0"
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        mkdir -p /opt/airflow/logs /opt/airflow/dags /opt/airflow/plugins
+        chown -R "${AIRFLOW_UID:-50000}:0" /opt/airflow/{logs,dags,plugins}
+        exec /entrypoint airflow version
+    restart: "no"
+
+  # -------------------------------------------------------------------------
+  # Airflow — web UI
+  # -------------------------------------------------------------------------
+  airflow_webserver:
+    <<: *airflow-common
+    container_name: airflow_webserver
+    command: webserver
+    ports:
+      - "${AIRFLOW_EXTERNAL_PORT}:8080"
+    depends_on:
+      airflow_init:
+        condition: service_completed_successfully
+    mem_limit: 1g
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # -------------------------------------------------------------------------
+  # Airflow — scheduler (this is where our PySpark jobs actually run)
+  # -------------------------------------------------------------------------
+  airflow_scheduler:
+    <<: *airflow-common
+    container_name: airflow_scheduler
+    command: scheduler
+    depends_on:
+      airflow_init:
+        condition: service_completed_successfully
+    mem_limit: 3g
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail http://localhost:8974/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # -------------------------------------------------------------------------
+  # Presentation layer
+  # -------------------------------------------------------------------------
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+      GF_INSTALL_PLUGINS: grafana-clickhouse-datasource
+      GF_USERS_DEFAULT_THEME: light
+    ports:
+      - "${GRAFANA_EXTERNAL_PORT}:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+    mem_limit: 512m
+    depends_on:
+      northwind_dw:
+        condition: service_healthy
+    networks:
+      - northwind_net
+    restart: unless-stopped
