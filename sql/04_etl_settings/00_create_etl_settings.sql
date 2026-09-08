@@ -51,9 +51,12 @@ BEGIN
 END
 GO
 
-/* Seed the two fact sources named in the project brief. */
+/* Seeded with capture instance names, not table names. Every CDC function
+   keys on the capture instance, so using the table name here would mean the
+   watermark lookup silently matches nothing and the pipeline reprocesses
+   its entire history on every run. */
 MERGE dbo.CDC_State AS target
-USING (VALUES ('Orders'), ('OrderDetails')) AS source(name)
+USING (VALUES ('dbo_Orders'), ('dbo_OrderDetails')) AS source(name)
     ON target.name = source.name
 WHEN NOT MATCHED THEN
     INSERT (name, state, last_run_time) VALUES (source.name, NULL, NULL);

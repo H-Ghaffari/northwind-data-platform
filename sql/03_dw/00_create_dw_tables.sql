@@ -284,7 +284,18 @@ CREATE VIEW IF NOT EXISTS v_DimTerritories_Current AS
 SELECT * FROM DimTerritories FINAL
 WHERE end_date = toDateTime('2106-01-01 00:00:00');
 
+
 -- Live rows only: FINAL applies both the version replacement and the
 -- is_deleted tombstones. Reporting should read this, never the raw table.
+--
+-- Columns are listed explicitly rather than SELECT *: line_total is
+-- MATERIALIZED and a star expansion silently omits it, which would leave
+-- every dashboard without the one measure it needs.
 CREATE VIEW IF NOT EXISTS v_FactOrders_Current AS
-SELECT * FROM FactOrders FINAL WHERE is_deleted = 0;
+SELECT
+    order_id, product_key, geography_key, customer_key, employee_key,
+    shipper_key, order_date_key, required_date_key, shipped_date_key,
+    freight, unit_price, quantity, discount, line_total,
+    ship_name, order_date, required_date, shipped_date
+FROM FactOrders FINAL
+WHERE is_deleted = 0;
