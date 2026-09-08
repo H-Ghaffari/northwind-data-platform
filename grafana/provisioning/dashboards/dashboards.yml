@@ -1,0 +1,23 @@
+# ---------------------------------------------------------------------------
+# Load dashboards from disk on startup.
+#
+# The dashboards live as JSON in the repository, so a change to a panel is a
+# reviewable diff rather than an invisible edit in someone's browser.
+#
+# allowUiUpdates is on: edits made in the UI are kept until the next
+# restart, which makes iterating on a panel practical. Anything worth
+# keeping has to be exported back into the JSON file.
+# ---------------------------------------------------------------------------
+apiVersion: 1
+
+providers:
+  - name: Northwind
+    orgId: 1
+    folder: Northwind
+    type: file
+    disableDeletion: false
+    allowUiUpdates: true
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

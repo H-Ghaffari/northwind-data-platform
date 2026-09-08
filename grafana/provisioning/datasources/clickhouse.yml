@@ -1,0 +1,34 @@
+# ---------------------------------------------------------------------------
+# ClickHouse datasource, provisioned rather than clicked through the UI.
+#
+# A hand-created datasource lives only in Grafana's own database, so it does
+# not survive a volume reset and cannot be reviewed. Declaring it here makes
+# the connection part of the repository: anyone who starts the stack gets a
+# working datasource with no setup step.
+#
+# Credentials come from the environment, so nothing secret is committed.
+# ---------------------------------------------------------------------------
+apiVersion: 1
+
+datasources:
+  - name: ClickHouse
+    uid: northwind-dw
+    type: grafana-clickhouse-datasource
+    access: proxy
+    isDefault: true
+    editable: false
+    jsonData:
+      # Container-to-container: Grafana reaches ClickHouse on the compose
+      # network, not through the host port mapping.
+      host: northwind_dw
+      port: 9000
+      protocol: native
+      secure: false
+      username: $CLICKHOUSE_USER
+      defaultDatabase: $DW_DB
+      # Dashboards refresh every 5 seconds, so a query that has not returned
+      # by then is already stale and should be abandoned.
+      dialTimeout: 10
+      queryTimeout: 30
+    secureJsonData:
+      password: $CLICKHOUSE_PASSWORD

@@ -1,0 +1,287 @@
+{
+  "uid": "northwind-ops",
+  "title": "Northwind — Pipeline Health",
+  "description": "Whether the warehouse can be trusted right now: row counts against expectations, unresolved foreign keys, outstanding inferred members, and how far behind the CDC watermark is. A dashboard showing revenue is worth nothing if nobody is watching whether the numbers behind it are complete.",
+  "tags": ["northwind", "operations", "data-quality"],
+  "timezone": "browser",
+  "editable": true,
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "time": { "from": "now-24h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Fact rows",
+      "description": "Expected 2155 for the unmodified Northwind sample.",
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-dw" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "values": false },
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT count() AS fact_rows FROM v_FactOrders_Current"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Unresolved product keys",
+      "description": "Facts pointing at product_key 0, meaning the lookup found nothing and no inferred member was created. Should always be zero.",
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-dw" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "values": false },
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT count() AS unresolved FROM v_FactOrders_Current WHERE product_key = 0"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Unresolved customer keys",
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 0 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-dw" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "values": false },
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT count() AS unresolved FROM v_FactOrders_Current WHERE customer_key = 0"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Inferred members",
+      "description": "Dimension stubs created by the fact load and not yet enriched. A few are normal between dimension runs; a number that keeps growing means the dimension load is not keeping up.",
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 0 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-dw" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "red", "value": 10 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "values": false },
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT (SELECT count() FROM v_DimProducts_Current WHERE product_name = '') + (SELECT count() FROM v_DimCustomer_Current WHERE company_name = '') + (SELECT count() FROM v_DimEmployees_Current WHERE full_name = '') AS stubs"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Tombstoned facts",
+      "description": "Rows marked deleted by CDC. Kept rather than removed so a delete stays auditable.",
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 0 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-dw" },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "text" } }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "values": false },
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT count() AS tombstoned FROM FactOrders FINAL WHERE is_deleted = 1"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Historical dimension rows",
+      "description": "Closed SCD type 2 versions. Growth here is the history being kept, not a problem.",
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 0 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-dw" },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "blue" } }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "values": false },
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT (SELECT count() FROM DimProducts FINAL WHERE end_date != toDateTime('2106-01-01 00:00:00')) + (SELECT count() FROM DimCustomer FINAL WHERE end_date != toDateTime('2106-01-01 00:00:00')) + (SELECT count() FROM DimEmployees FINAL WHERE end_date != toDateTime('2106-01-01 00:00:00')) AS closed_rows"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "table",
+      "title": "Dimension row counts",
+      "description": "Current rows against the expected count for an unmodified Northwind. A mismatch here is the first thing to check when a figure elsewhere looks wrong.",
+      "gridPos": { "h": 10, "w": 12, "x": 0, "y": 4 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-dw" },
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "auto" } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "status" },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": { "type": "color-text" }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "OK": { "color": "green", "index": 0 },
+                      "MISMATCH": { "color": "red", "index": 1 }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "options": { "showHeader": true },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT name, actual, expected, if(actual = expected, 'OK', 'MISMATCH') AS status FROM (SELECT 'DimGeography' AS name, (SELECT count() FROM DimGeography FINAL) AS actual, 135 AS expected UNION ALL SELECT 'DimShippers', (SELECT count() FROM DimShippers FINAL), 3 UNION ALL SELECT 'DimTerritories', (SELECT count() FROM v_DimTerritories_Current), 53 UNION ALL SELECT 'DimSuppliers', (SELECT count() FROM v_DimSuppliers_Current), 29 UNION ALL SELECT 'DimCustomer', (SELECT count() FROM v_DimCustomer_Current), 91 UNION ALL SELECT 'DimProducts', (SELECT count() FROM v_DimProducts_Current), 77 UNION ALL SELECT 'DimEmployees', (SELECT count() FROM v_DimEmployees_Current), 9 UNION ALL SELECT 'FactEmployeeTerritories', (SELECT count() FROM FactEmployeeTerritories FINAL), 49 UNION ALL SELECT 'FactOrders', (SELECT count() FROM v_FactOrders_Current), 2155) ORDER BY status DESC, name"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "table",
+      "title": "Storage and merge state",
+      "description": "Parts per table. ReplacingMergeTree deduplicates during background merges, so a high part count means reads without FINAL may still see duplicates.",
+      "gridPos": { "h": 10, "w": 12, "x": 12, "y": 4 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-dw" },
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "auto" } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "size" },
+            "properties": [{ "id": "unit", "value": "decbytes" }]
+          }
+        ]
+      },
+      "options": { "showHeader": true },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT table, sum(rows) AS rows_on_disk, count() AS parts, sum(bytes_on_disk) AS size FROM system.parts WHERE database = currentDatabase() AND active GROUP BY table ORDER BY rows_on_disk DESC"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Orders loaded per month",
+      "description": "Distribution of what is actually in the warehouse. A month that suddenly empties points at a load that failed rather than at a quiet month.",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 14 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-dw" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": { "drawStyle": "bars", "fillOpacity": 70, "lineWidth": 1 }
+        }
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": false },
+        "tooltip": { "mode": "single" }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 0,
+          "queryType": "sql",
+          "rawSql": "SELECT toStartOfMonth(d.full_date) AS time, uniqExact(f.order_id) AS orders FROM v_FactOrders_Current AS f INNER JOIN DimDate AS d ON d.date_key = f.order_date_key GROUP BY time ORDER BY time"
+        }
+      ]
+    }
+  ]
+}
