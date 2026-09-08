@@ -39,15 +39,30 @@ def load_geography(spark: SparkSession) -> int:
     Four tables carry addresses and none of them owns the concept, so the
     dimension is their union. UNION rather than UNION ALL: the same city
     appears under many customers and only distinct locations are wanted.
+
+    NULLs are collapsed to empty strings before the union. Region is null on
+    two thirds of these rows, and NULL = NULL is not true in SQL, so leaving
+    them would silently drop those rows from every lookup that joins on the
+    address tuple.
     """
     query = """
-        SELECT Country, Region, City, PostalCode, Address FROM Customers
+        SELECT ISNULL(Country,'')    AS Country,
+               ISNULL(Region,'')     AS Region,
+               ISNULL(City,'')       AS City,
+               ISNULL(PostalCode,'') AS PostalCode,
+               ISNULL(Address,'')    AS Address
+        FROM Customers
         UNION
-        SELECT Country, Region, City, PostalCode, Address FROM Employees
+        SELECT ISNULL(Country,''), ISNULL(Region,''), ISNULL(City,''),
+               ISNULL(PostalCode,''), ISNULL(Address,'')
+        FROM Employees
         UNION
-        SELECT Country, Region, City, PostalCode, Address FROM Suppliers
+        SELECT ISNULL(Country,''), ISNULL(Region,''), ISNULL(City,''),
+               ISNULL(PostalCode,''), ISNULL(Address,'')
+        FROM Suppliers
         UNION
-        SELECT ShipCountry, ShipRegion, ShipCity, ShipPostalCode, ShipAddress
+        SELECT ISNULL(ShipCountry,''), ISNULL(ShipRegion,''), ISNULL(ShipCity,''),
+               ISNULL(ShipPostalCode,''), ISNULL(ShipAddress,'')
         FROM Orders
     """
     df = read_from_op(spark, query).toDF(
@@ -55,7 +70,6 @@ def load_geography(spark: SparkSession) -> int:
     )
     truncate_staging_table("staging_geography")
     return write_to_staging(df, "staging_geography")
-
 
 # ---------------------------------------------------------------------------
 # Products
@@ -108,7 +122,11 @@ def load_suppliers(spark: SparkSession) -> int:
     query = """
         SELECT
             SupplierID, CompanyName, ContactName, ContactTitle,
-            Address, City, Region, PostalCode, Country,
+            ISNULL(Address,'')    AS Address,
+            ISNULL(City,'')       AS City,
+            ISNULL(Region,'')     AS Region,
+            ISNULL(PostalCode,'') AS PostalCode,
+            ISNULL(Country,'')    AS Country,
             Phone, Fax, CAST(HomePage AS NVARCHAR(MAX)) AS HomePage
         FROM Suppliers
     """
@@ -130,7 +148,12 @@ def load_customers(spark: SparkSession) -> int:
     query = """
         SELECT
             CustomerID, CompanyName, ContactName, ContactTitle,
-            Address, City, Region, PostalCode, Country, Phone, Fax
+            ISNULL(Address,'')    AS Address,
+            ISNULL(City,'')       AS City,
+            ISNULL(Region,'')     AS Region,
+            ISNULL(PostalCode,'') AS PostalCode,
+            ISNULL(Country,'')    AS Country,
+            Phone, Fax
         FROM Customers
     """
     df = read_from_op(spark, query).toDF(
@@ -171,7 +194,11 @@ def load_employees(spark: SparkSession) -> int:
             BirthDate,
             DATEDIFF(YEAR, BirthDate, GETDATE())  AS Age,
             HireDate,
-            Address, City, Region, PostalCode, Country,
+            ISNULL(Address,'')    AS Address,
+            ISNULL(City,'')       AS City,
+            ISNULL(Region,'')     AS Region,
+            ISNULL(PostalCode,'') AS PostalCode,
+            ISNULL(Country,'')    AS Country,
             HomePhone,
             Extension,
             CAST(Notes AS NVARCHAR(MAX))          AS Notes,
