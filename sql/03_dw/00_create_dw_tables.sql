@@ -15,7 +15,7 @@
 
      3. Nullable columns cost an extra stored column. end_date therefore uses
         a sentinel far-future date instead of NULL, so "the current row" is
-        `end_date = '2999-12-31'` rather than `end_date IS NULL`.
+        `end_date = '2106-01-01'` rather than `end_date IS NULL`.
 
    Idempotent: safe to run more than once.
    =========================================================================== */
@@ -77,7 +77,7 @@ CREATE TABLE IF NOT EXISTS DimSuppliers
     fax                    String,
     home_page              String,
     start_date             DateTime,
-    end_date               DateTime DEFAULT toDateTime('2999-12-31 00:00:00'),
+    end_date               DateTime DEFAULT toDateTime('2106-01-01 00:00:00'),
     _version               UInt64   DEFAULT toUnixTimestamp64Milli(now64())
 )
 ENGINE = ReplacingMergeTree(_version)
@@ -104,7 +104,7 @@ CREATE TABLE IF NOT EXISTS DimProducts
     reorder_level          Int16,
     discontinued           UInt8,
     start_date             DateTime,
-    end_date               DateTime DEFAULT toDateTime('2999-12-31 00:00:00'),
+    end_date               DateTime DEFAULT toDateTime('2106-01-01 00:00:00'),
     _version               UInt64   DEFAULT toUnixTimestamp64Milli(now64())
 )
 ENGINE = ReplacingMergeTree(_version)
@@ -124,7 +124,7 @@ CREATE TABLE IF NOT EXISTS DimCustomer
     phone                   String,
     fax                     String,
     start_date              DateTime,
-    end_date                DateTime DEFAULT toDateTime('2999-12-31 00:00:00'),
+    end_date                DateTime DEFAULT toDateTime('2106-01-01 00:00:00'),
     _version                UInt64   DEFAULT toUnixTimestamp64Milli(now64())
 )
 ENGINE = ReplacingMergeTree(_version)
@@ -151,15 +151,15 @@ CREATE TABLE IF NOT EXISTS DimEmployees
     full_name               String,
     title                   String,
     title_of_courtesy       String,
-    birth_date              Nullable(DateTime),
+    birth_date              Nullable(Date32),
     age                     UInt8,
-    hire_date               Nullable(DateTime),
+    hire_date               Nullable(Date32),
     home_phone              String,
     extension               String,
     notes                   String,
     photo_path              String,
     start_date              DateTime,
-    end_date                DateTime DEFAULT toDateTime('2999-12-31 00:00:00'),
+    end_date                DateTime DEFAULT toDateTime('2106-01-01 00:00:00'),
     _version                UInt64   DEFAULT toUnixTimestamp64Milli(now64())
 )
 ENGINE = ReplacingMergeTree(_version)
@@ -195,7 +195,7 @@ CREATE TABLE IF NOT EXISTS DimTerritories
     region_description       String,
     territory_description    String,
     start_date               DateTime,
-    end_date                 DateTime DEFAULT toDateTime('2999-12-31 00:00:00'),
+    end_date                 DateTime DEFAULT toDateTime('2106-01-01 00:00:00'),
     _version                 UInt64   DEFAULT toUnixTimestamp64Milli(now64())
 )
 ENGINE = ReplacingMergeTree(_version)
@@ -266,23 +266,23 @@ ORDER BY (employee_key, territory_key);
 -- ---------------------------------------------------------------------------
 CREATE VIEW IF NOT EXISTS v_DimProducts_Current AS
 SELECT * FROM DimProducts FINAL
-WHERE end_date = toDateTime('2999-12-31 00:00:00');
+WHERE end_date = toDateTime('2106-01-01 00:00:00');
 
 CREATE VIEW IF NOT EXISTS v_DimCustomer_Current AS
 SELECT * FROM DimCustomer FINAL
-WHERE end_date = toDateTime('2999-12-31 00:00:00');
+WHERE end_date = toDateTime('2106-01-01 00:00:00');
 
 CREATE VIEW IF NOT EXISTS v_DimEmployees_Current AS
 SELECT * FROM DimEmployees FINAL
-WHERE end_date = toDateTime('2999-12-31 00:00:00');
+WHERE end_date = toDateTime('2106-01-01 00:00:00');
 
 CREATE VIEW IF NOT EXISTS v_DimSuppliers_Current AS
 SELECT * FROM DimSuppliers FINAL
-WHERE end_date = toDateTime('2999-12-31 00:00:00');
+WHERE end_date = toDateTime('2106-01-01 00:00:00');
 
 CREATE VIEW IF NOT EXISTS v_DimTerritories_Current AS
 SELECT * FROM DimTerritories FINAL
-WHERE end_date = toDateTime('2999-12-31 00:00:00');
+WHERE end_date = toDateTime('2106-01-01 00:00:00');
 
 -- Live rows only: FINAL applies both the version replacement and the
 -- is_deleted tombstones. Reporting should read this, never the raw table.

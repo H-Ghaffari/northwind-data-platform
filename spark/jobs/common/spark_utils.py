@@ -11,6 +11,7 @@ import glob
 import logging
 from contextlib import contextmanager
 from typing import Iterator
+from datetime import date, datetime
 
 import clickhouse_connect
 import psycopg2
@@ -182,14 +183,56 @@ def write_to_dw(
     Column order is passed explicitly rather than inferred, because
     ClickHouse matches inserts positionally and a silent reordering would
     corrupt the load without raising anything.
+
+    Nulls are replaced with the zero value of the target column's type.
+    Almost every column in the star schema is non-Nullable by design — a
+    Nullable column in ClickHouse costs an extra stored column — so a null
+    arriving from a source that permits them would otherwise abort the whole
+    insert. Doing the substitution here means each loader does not have to
+    remember a COALESCE for every nullable source column.
     """
-    rows = [tuple(row[c] for c in columns) for row in df.collect()]
-    if not rows:
-        log.warning("Nothing to insert into %s", table)
+    if not columns:
         return 0
 
+    # Ask the target what each column's type is, so the replacement matches.
     client = dw_client()
     try:
+        schema = {
+            row[0]: row[1]
+            for row in client.query(
+                f"SELECT name, type FROM system.columns "
+                f"WHERE database = currentDatabase() AND table = '{table}'"
+            ).result_rows
+        }
+
+        def zero_value(column: str):
+            column_type = schema.get(column, "String")
+            if column_type.startswith("Nullable"):
+                return None
+            if "Int" in column_type or "Float" in column_type or "Decimal" in column_type:
+                return 0
+            if "Date32" in column_type:
+                return date(1900, 1, 1)
+            if "DateTime" in column_type:
+                return datetime(1970, 1, 1)
+            if "Date" in column_type:
+                return date(1970, 1, 1)
+            return ""
+
+        defaults = {c: zero_value(c) for c in columns}
+
+        rows = [
+            tuple(
+                defaults[c] if row[c] is None else row[c]
+                for c in columns
+            )
+            for row in df.collect()
+        ]
+
+        if not rows:
+            log.warning("Nothing to insert into %s", table)
+            return 0
+
         for start in range(0, len(rows), batch_size):
             client.insert(table, rows[start:start + batch_size], column_names=columns)
         log.info("Inserted %s rows into %s", f"{len(rows):,}", table)
