@@ -468,5 +468,18 @@ if __name__ == "__main__":
     if mode == "initial":
         run_initial()
     else:
-        run_incremental()
+        # Run outside Airflow: nobody passed the LSN window, so it is read
+        # back from the current CDC position. Safe here because both stages
+        # run seconds apart by hand; in the DAG the window travels through
+        # XCom, which is the only way to be sure the watermark does not
+        # advance past changes that arrived between the two tasks.
+        from common.cdc_reader import get_cdc_window
+
+        orders = get_cdc_window("dbo_Orders")
+        details = get_cdc_window("dbo_OrderDetails")
+        window = {
+            "orders_to_lsn": orders.to_lsn.hex() if not orders.is_empty else None,
+            "details_to_lsn": details.to_lsn.hex() if not details.is_empty else None,
+        }
+        run_incremental(window)
     sys.exit(0)
