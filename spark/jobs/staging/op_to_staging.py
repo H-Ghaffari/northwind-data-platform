@@ -10,6 +10,15 @@ the dimension sources are small — 91 customers, 77 products, 9 employees —
 and reloading them wholesale is both simpler and impossible to get subtly
 out of step with the source.
 
+Nulls are normalised here and nowhere else. Staging is the integration
+boundary: every nullable string is coalesced to '' at this point, so the
+geography lookup, the SCD comparison and the warehouse insert all see the
+same shape. Handling it further downstream means each consumer has to
+remember, and the one that forgets reports a change on every run.
+
+Dates are left nullable on purpose. An unknown birth date is not
+1900-01-01, and DimEmployees stores it as Nullable(Date32) for that reason.
+
 Each function can be called on its own, which is what lets the Airflow DAG
 map them to independent tasks that fail and retry separately.
 """
@@ -40,10 +49,10 @@ def load_geography(spark: SparkSession) -> int:
     dimension is their union. UNION rather than UNION ALL: the same city
     appears under many customers and only distinct locations are wanted.
 
-    NULLs are collapsed to empty strings before the union. Region is null on
-    two thirds of these rows, and NULL = NULL is not true in SQL, so leaving
-    them would silently drop those rows from every lookup that joins on the
-    address tuple.
+    Coalescing before the union matters twice over. Region is null on two
+    thirds of these rows, and NULL = NULL is not true in SQL — so without it
+    the union would treat two identical addresses as distinct, and every
+    lookup joining on the address tuple would miss them.
     """
     query = """
         SELECT ISNULL(Country,'')    AS Country,
@@ -71,6 +80,7 @@ def load_geography(spark: SparkSession) -> int:
     truncate_staging_table("staging_geography")
     return write_to_staging(df, "staging_geography")
 
+
 # ---------------------------------------------------------------------------
 # Products
 # ---------------------------------------------------------------------------
@@ -83,19 +93,20 @@ def load_products(spark: SparkSession) -> int:
     snowflake into a star — DimProducts has no category dimension beside it.
 
     LEFT JOIN, not INNER: a product with a missing category should still
-    reach the warehouse rather than vanish from every report.
+    reach the warehouse rather than vanish from every report. That is also
+    why CategoryName is coalesced — the join itself can produce a null.
     """
     query = """
         SELECT
             p.ProductID,
-            p.ProductName,
+            ISNULL(p.ProductName,'')     AS ProductName,
             p.SupplierID,
-            c.CategoryName,
-            p.QuantityPerUnit,
-            p.UnitPrice,
-            p.UnitsInStock,
-            p.UnitsOnOrder,
-            p.ReorderLevel,
+            ISNULL(c.CategoryName,'')    AS CategoryName,
+            ISNULL(p.QuantityPerUnit,'') AS QuantityPerUnit,
+            ISNULL(p.UnitPrice, 0)       AS UnitPrice,
+            ISNULL(p.UnitsInStock, 0)    AS UnitsInStock,
+            ISNULL(p.UnitsOnOrder, 0)    AS UnitsOnOrder,
+            ISNULL(p.ReorderLevel, 0)    AS ReorderLevel,
             p.Discontinued
         FROM Products AS p
         LEFT JOIN Categories AS c ON c.CategoryID = p.CategoryID
@@ -116,18 +127,26 @@ def load_products(spark: SparkSession) -> int:
 def load_suppliers(spark: SparkSession) -> int:
     """Suppliers, carried across unchanged.
 
+    HomePage is ntext, which the JDBC driver mishandles, so it is cast to
+    NVARCHAR(MAX) before being read.
+
     The address columns travel with the row even though geography is its own
     dimension: the Staging → DW step needs them to resolve the geography_key.
     """
     query = """
         SELECT
-            SupplierID, CompanyName, ContactName, ContactTitle,
-            ISNULL(Address,'')    AS Address,
-            ISNULL(City,'')       AS City,
-            ISNULL(Region,'')     AS Region,
-            ISNULL(PostalCode,'') AS PostalCode,
-            ISNULL(Country,'')    AS Country,
-            Phone, Fax, CAST(HomePage AS NVARCHAR(MAX)) AS HomePage
+            SupplierID,
+            ISNULL(CompanyName,'')  AS CompanyName,
+            ISNULL(ContactName,'')  AS ContactName,
+            ISNULL(ContactTitle,'') AS ContactTitle,
+            ISNULL(Address,'')      AS Address,
+            ISNULL(City,'')         AS City,
+            ISNULL(Region,'')       AS Region,
+            ISNULL(PostalCode,'')   AS PostalCode,
+            ISNULL(Country,'')      AS Country,
+            ISNULL(Phone,'')        AS Phone,
+            ISNULL(Fax,'')          AS Fax,
+            ISNULL(CAST(HomePage AS NVARCHAR(MAX)),'') AS HomePage
         FROM Suppliers
     """
     df = read_from_op(spark, query).toDF(
@@ -147,13 +166,17 @@ def load_customers(spark: SparkSession) -> int:
     """Customers, carried across unchanged."""
     query = """
         SELECT
-            CustomerID, CompanyName, ContactName, ContactTitle,
-            ISNULL(Address,'')    AS Address,
-            ISNULL(City,'')       AS City,
-            ISNULL(Region,'')     AS Region,
-            ISNULL(PostalCode,'') AS PostalCode,
-            ISNULL(Country,'')    AS Country,
-            Phone, Fax
+            CustomerID,
+            ISNULL(CompanyName,'')  AS CompanyName,
+            ISNULL(ContactName,'')  AS ContactName,
+            ISNULL(ContactTitle,'') AS ContactTitle,
+            ISNULL(Address,'')      AS Address,
+            ISNULL(City,'')         AS City,
+            ISNULL(Region,'')       AS Region,
+            ISNULL(PostalCode,'')   AS PostalCode,
+            ISNULL(Country,'')      AS Country,
+            ISNULL(Phone,'')        AS Phone,
+            ISNULL(Fax,'')          AS Fax
         FROM Customers
     """
     df = read_from_op(spark, query).toDF(
@@ -180,30 +203,33 @@ def load_employees(spark: SparkSession) -> int:
     dimension attribute; a report needing exact current age should compute
     it from birth_date directly.
 
-    Notes and Photo are read but not derived from — Photo is carried so the
-    Data Lake step can key on employee_id later.
+    BirthDate, HireDate and ReportsTo stay nullable. An unknown date is not
+    1900-01-01, and a null ReportsTo means "reports to nobody" — the root of
+    the hierarchy — which is information, not a missing value.
+
+    Notes is ntext and cast for the same reason as HomePage above.
     """
     query = """
         SELECT
             EmployeeID,
-            LastName,
-            FirstName,
-            FirstName + ' ' + LastName            AS FullName,
-            Title,
-            TitleOfCourtesy,
+            ISNULL(LastName,'')        AS LastName,
+            ISNULL(FirstName,'')       AS FirstName,
+            ISNULL(FirstName,'') + ' ' + ISNULL(LastName,'') AS FullName,
+            ISNULL(Title,'')           AS Title,
+            ISNULL(TitleOfCourtesy,'') AS TitleOfCourtesy,
             BirthDate,
-            DATEDIFF(YEAR, BirthDate, GETDATE())  AS Age,
+            DATEDIFF(YEAR, BirthDate, GETDATE()) AS Age,
             HireDate,
             ISNULL(Address,'')    AS Address,
             ISNULL(City,'')       AS City,
             ISNULL(Region,'')     AS Region,
             ISNULL(PostalCode,'') AS PostalCode,
             ISNULL(Country,'')    AS Country,
-            HomePhone,
-            Extension,
-            CAST(Notes AS NVARCHAR(MAX))          AS Notes,
+            ISNULL(HomePhone,'')  AS HomePhone,
+            ISNULL(Extension,'')  AS Extension,
+            ISNULL(CAST(Notes AS NVARCHAR(MAX)),'') AS Notes,
             ReportsTo,
-            PhotoPath
+            ISNULL(PhotoPath,'')  AS PhotoPath
         FROM Employees
     """
     df = read_from_op(spark, query).toDF(
@@ -222,8 +248,13 @@ def load_employees(spark: SparkSession) -> int:
 
 def load_shippers(spark: SparkSession) -> int:
     """Shippers, carried across unchanged."""
-    query = "SELECT ShipperID, CompanyName, Phone FROM Shippers"
-
+    query = """
+        SELECT
+            ShipperID,
+            ISNULL(CompanyName,'') AS CompanyName,
+            ISNULL(Phone,'')       AS Phone
+        FROM Shippers
+    """
     df = read_from_op(spark, query).toDF("shipper_id", "company_name", "phone")
     truncate_staging_table("staging_shippers")
     return write_to_staging(df, "staging_shippers")
@@ -240,12 +271,15 @@ def load_territories(spark: SparkSession) -> int:
     padded with trailing spaces. Left alone, the padding travels into the
     warehouse and every string comparison and GROUP BY downstream has to
     account for it.
+
+    RTRIM is applied inside ISNULL rather than outside, so a null becomes ''
+    rather than being trimmed to null.
     """
     query = """
         SELECT
-            RTRIM(t.TerritoryID)          AS TerritoryID,
-            RTRIM(t.TerritoryDescription) AS TerritoryDescription,
-            RTRIM(r.RegionDescription)    AS RegionDescription
+            ISNULL(RTRIM(t.TerritoryID),'')          AS TerritoryID,
+            ISNULL(RTRIM(t.TerritoryDescription),'') AS TerritoryDescription,
+            ISNULL(RTRIM(r.RegionDescription),'')    AS RegionDescription
         FROM Territories AS t
         LEFT JOIN Region AS r ON r.RegionID = t.RegionID
     """
@@ -263,7 +297,7 @@ def load_territories(spark: SparkSession) -> int:
 def load_employee_territories(spark: SparkSession) -> int:
     """The employee-to-territory bridge, source of the factless fact table."""
     query = """
-        SELECT EmployeeID, RTRIM(TerritoryID) AS TerritoryID
+        SELECT EmployeeID, ISNULL(RTRIM(TerritoryID),'') AS TerritoryID
         FROM EmployeeTerritories
     """
     df = read_from_op(spark, query).toDF("employee_id", "territory_id")
