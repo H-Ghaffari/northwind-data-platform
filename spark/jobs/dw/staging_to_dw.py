@@ -167,8 +167,12 @@ def load_dim_territories(spark: SparkSession) -> int:
     changes = apply_scd(
         incoming, current,
         business_key="territory_alternate_key",
-        type1_columns=["region_description"],
-        type2_columns=["territory_description"],
+        # Taken from package 05: the type 1 UPDATE names TerritoryDescription,
+        # so a renamed territory is a correction. RegionDescription is absent
+        # from it, which makes moving a territory to another region a
+        # historical event worth versioning.
+        type1_columns=["territory_description"],
+        type2_columns=["region_description"],
         run_time=run_time,
     )
 

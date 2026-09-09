@@ -1,22 +1,29 @@
-"""Apply CDC changes to FactOrders every 30 minutes.
+"""Apply CDC changes to FactOrders, in two stages.
 
-The cadence comes from the brief: "30 Minutes => Captured Instance". The
-window between runs is what makes inferred members necessary — a fact can
-arrive up to a day before the dimension load that describes it.
+The cadence comes from the brief: "30 Minutes => Captured Instance".
+
+Two tasks rather than one, mirroring the reference project's split between
+packages 11/12 (OP → Staging) and package 13 (Staging → DW):
+
+    op_to_staging   reads CDC, snapshots the affected orders, lands six tables
+    staging_to_dw   resolves keys, applies to the warehouse, moves watermark
+
+The split earns its keep when the second half fails. Everything CDC
+reported is already in staging, so the retry resolves keys again without
+going back to the source — and the watermark has not moved, so nothing is
+lost either way.
+
+The LSN window travels between the two through XCom. Recomputing it in the
+second task would be wrong: changes may arrive in the seconds between them,
+and advancing the watermark past unprocessed changes would skip them.
 
 Scheduled on a clock rather than on the dimension dataset, deliberately.
-The facts must keep flowing every half hour whether or not the dimensions
-have reloaded; that gap is exactly what inferred members exist to absorb.
-Waiting on DW_DIMENSIONS here would tie a half-hourly job to a nightly one.
+Facts must keep flowing every half hour whether or not the dimensions have
+reloaded; that gap is exactly what inferred members exist to absorb.
 
-max_active_runs is 1 because two concurrent runs would read overlapping LSN
-windows and race on the watermark. catchup is False because a missed run
-does not need replaying: the next run's window starts from the same
-watermark and covers everything that accumulated.
-
-Retries are deliberately generous. The watermark only advances after a
-successful write, so a retry reprocesses the same window rather than
-skipping it, and the fact table deduplicates on (order_id, product_key).
+max_active_runs is 1 because two concurrent runs would truncate each
+other's staging tables mid-flight. catchup is False because a missed run
+needs no replay: the next window starts from the same watermark.
 """
 
 from __future__ import annotations
@@ -44,12 +51,27 @@ DEFAULT_ARGS = {
 }
 
 
-def run_incremental() -> int:
-    """Apply the CDC window. Imports the job module at execution time."""
+def _op_to_staging(**context) -> int:
+    """Stage one: land the CDC window and snapshot the orders it touched."""
     if "/opt/spark-jobs/jobs" not in sys.path:
         sys.path.insert(0, "/opt/spark-jobs/jobs")
-    from dw.fact_orders import run_one
-    return run_one("incremental")
+    from staging.op_to_staging_facts import run_incremental
+
+    window = run_incremental()
+    context["ti"].xcom_push(key="cdc_window", value=window)
+    return window["total_changes"]
+
+
+def _staging_to_dw(**context) -> int:
+    """Stage two: resolve keys, apply to the warehouse, move the watermark."""
+    if "/opt/spark-jobs/jobs" not in sys.path:
+        sys.path.insert(0, "/opt/spark-jobs/jobs")
+    from dw.staging_to_dw_facts import run_incremental
+
+    window = context["ti"].xcom_pull(
+        task_ids="op_to_staging_facts", key="cdc_window"
+    )
+    return run_incremental(window)
 
 
 with DAG(
@@ -65,12 +87,17 @@ with DAG(
 
     start = EmptyOperator(task_id="start")
 
-    load = PythonOperator(
-        task_id="incremental_load",
-        python_callable=run_incremental,
+    op_to_staging = PythonOperator(
+        task_id="op_to_staging_facts",
+        python_callable=_op_to_staging,
+    )
+
+    staging_to_dw = PythonOperator(
+        task_id="staging_to_dw_facts",
+        python_callable=_staging_to_dw,
         outlets=[DW_FACTS],
     )
 
     end = EmptyOperator(task_id="end")
 
-    start >> load >> end
+    start >> op_to_staging >> staging_to_dw >> end
