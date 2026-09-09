@@ -14,9 +14,9 @@ Getting this wrong does not fail loudly: the lookup simply returns nothing
 and the rows land with key 0, which looks like a data problem rather than
 an ordering one.
 
-Scheduled after the staging DAG rather than triggered by it. A dataset- or
-sensor-based trigger would couple them more tightly; a time offset is
-enough at this cadence and keeps each DAG independently runnable.
+Triggered by the staging DAG through a dataset rather than by a clock. The
+previous version ran at 22:30 on the assumption that the 22:00 staging load
+would be finished — an assumption that holds until it does not.
 """
 
 from __future__ import annotations
@@ -28,9 +28,10 @@ from airflow import DAG
 from airflow.operators.empty import EmptyOperator
 from airflow.operators.python import PythonOperator
 
-sys.path.insert(0, "/opt/spark-jobs/jobs")
+sys.path.insert(0, "/opt/airflow/dags")
 
-from dw.staging_to_dw import run_one  # noqa: E402
+from dag_common.datasets import DW_DIMENSIONS, STAGING_DIMENSIONS  # noqa: E402
+from dag_common.etl_logger import on_failure, on_success  # noqa: E402
 
 DEFAULT_ARGS = {
     "owner": "data-engineering",
@@ -38,13 +39,23 @@ DEFAULT_ARGS = {
     "retries": 2,
     "retry_delay": timedelta(minutes=5),
     "execution_timeout": timedelta(minutes=45),
+    "on_success_callback": on_success,
+    "on_failure_callback": on_failure,
 }
+
+
+def load_dimension(name: str) -> int:
+    """Run one warehouse loader. Imports the job module at execution time."""
+    if "/opt/spark-jobs/jobs" not in sys.path:
+        sys.path.insert(0, "/opt/spark-jobs/jobs")
+    from dw.staging_to_dw import run_one
+    return run_one(name)
 
 
 def _task(task_id: str) -> PythonOperator:
     return PythonOperator(
         task_id=task_id,
-        python_callable=run_one,
+        python_callable=load_dimension,
         op_args=[task_id],
     )
 
@@ -54,16 +65,13 @@ with DAG(
     description="Load dimensions from PostgreSQL staging into the ClickHouse star schema",
     default_args=DEFAULT_ARGS,
     start_date=datetime(2026, 1, 1),
-    # 22:30 — half an hour after the staging DAG, which is comfortably
-    # longer than that DAG takes at this data volume.
-    schedule="30 22 * * *",
+    schedule=[STAGING_DIMENSIONS],
     catchup=False,
     max_active_runs=1,
     tags=["northwind", "dw", "dimensions", "scd"],
 ) as dag:
 
     start = EmptyOperator(task_id="start")
-    end = EmptyOperator(task_id="end")
 
     geography = _task("dim_geography")
     shippers = _task("dim_shippers")
@@ -74,6 +82,12 @@ with DAG(
     employees = _task("dim_employees")
     hierarchy = _task("employee_hierarchy")
     bridge = _task("fact_employee_territories")
+
+    # Every dimension is in place; the fact loads can resolve keys now.
+    dimensions_ready = EmptyOperator(
+        task_id="dimensions_ready",
+        outlets=[DW_DIMENSIONS],
+    )
 
     # Independent of everything else.
     start >> [geography, shippers, territories]
@@ -91,4 +105,4 @@ with DAG(
     # The bridge needs both dimensions it points at.
     [hierarchy, territories] >> bridge
 
-    [products, customer, shippers, bridge] >> end
+    [products, customer, shippers, bridge] >> dimensions_ready

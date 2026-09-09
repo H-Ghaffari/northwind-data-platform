@@ -19,7 +19,9 @@ from airflow.operators.empty import EmptyOperator
 from airflow.operators.python import PythonOperator
 
 sys.path.insert(0, "/opt/spark-jobs/jobs")
+sys.path.insert(0, "/opt/airflow/dags")
 
+from dag_common.datasets import LAKE_PHOTOS  # noqa: E402
 from lake.photo_generator import generate_photos, register_catalogue, verify  # noqa: E402
 
 DEFAULT_ARGS = {
@@ -75,6 +77,7 @@ with DAG(
     check = PythonOperator(
         task_id="verify_catalogue",
         python_callable=verify,
+        outlets=[LAKE_PHOTOS],
     )
 
     end = EmptyOperator(task_id="end")
