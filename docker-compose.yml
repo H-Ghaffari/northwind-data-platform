@@ -56,12 +56,14 @@ x-airflow-common: &airflow-common
 
     JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
     SPARK_JARS_DIR: /opt/spark-jars
+    LAKE_ROOT: /data/lake
   volumes:
     - ./airflow/dags:/opt/airflow/dags
     - ./airflow/plugins:/opt/airflow/plugins
     - ./airflow/logs:/opt/airflow/logs
     - ./spark:/opt/spark-jobs
     - ./sql:/opt/sql
+    - ./data/lake:/data/lake
   user: "${AIRFLOW_UID:-50000}:0"
   networks:
     - northwind_net

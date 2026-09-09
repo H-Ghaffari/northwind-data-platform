@@ -51,6 +51,9 @@ done
 echo "==> Creating star schema"
 run_ch_file "03_dw/00_create_dw_tables.sql"
 
+echo "==> Creating data lake catalogue"
+run_ch_file "03_dw/01_create_lake_tables.sql"
+
 echo "==> Verifying"
 run_ch "
 SELECT name, engine, partition_key, sorting_key

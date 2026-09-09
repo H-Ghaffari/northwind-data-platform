@@ -25,4 +25,8 @@ webserver_config.py
 # OS
 .DS_Store
 Thumbs.db
-EOF
+# Data lake — generated artefacts.
+# The avatars are produced deterministically by spark/jobs/lake, so the code
+# is the source of truth and the files are its output.
+data/lake/employees/*
+!data/lake/employees/.gitkeep
