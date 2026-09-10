@@ -1,0 +1,478 @@
+{
+  "uid": "nw-sales",
+  "title": "Northwind — Sales Performance",
+  "description": "Revenue, orders and product mix. Every panel reads the current-row views: ReplacingMergeTree leaves unmerged duplicates behind and SCD type 2 keeps closed rows, both of which would inflate these figures.",
+  "tags": ["northwind", "sales", "executive"],
+  "timezone": "browser",
+  "style": "dark",
+  "editable": true,
+  "schemaVersion": 39,
+  "version": 6,
+  "refresh": "5s",
+  "time": { "from": "1996-07-01T00:00:00.000Z", "to": "1998-05-31T23:59:59.000Z" },
+  "templating": {
+    "list": [
+      {
+        "name": "category",
+        "label": "Category",
+        "type": "query",
+        "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-dw" },
+        "query": "SELECT DISTINCT category_name FROM v_DimProducts_Current ORDER BY category_name",
+        "multi": true,
+        "includeAll": true,
+        "allValue": "%",
+        "current": { "text": ["All"], "value": ["$__all"] },
+        "refresh": 1
+      },
+      {
+        "name": "country",
+        "label": "Ship country",
+        "type": "query",
+        "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-dw" },
+        "query": "SELECT DISTINCT country FROM DimGeography FINAL WHERE country != '' ORDER BY country",
+        "multi": true,
+        "includeAll": true,
+        "allValue": "%",
+        "current": { "text": ["All"], "value": ["$__all"] },
+        "refresh": 1
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 100,
+      "type": "row",
+      "title": "Headline",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "collapsed": false
+    },
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Net revenue",
+      "description": "Total across the selected period. Sum of line_total — unit_price × quantity × (1 − discount) — materialised at insert so it is computed once rather than on every query. The sparkline underneath is the monthly series the total is drawn from.",
+      "gridPos": { "h": 5, "w": 5, "x": 0, "y": 1 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-dw" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 2,
+          "color": { "mode": "fixed", "fixedColor": "#73BF69" },
+          "custom": { "fillOpacity": 30 }
+        }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["sum"], "fields": "", "values": false },
+        "textMode": "value",
+        "graphMode": "area",
+        "colorMode": "value",
+        "justifyMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 0,
+          "queryType": "sql",
+          "rawSql": "SELECT toStartOfMonth(d.full_date) AS time, round(sum(f.line_total), 2) AS revenue FROM v_FactOrders_Current AS f INNER JOIN DimDate AS d ON d.date_key = f.order_date_key INNER JOIN v_DimProducts_Current AS p ON p.product_key = f.product_key LEFT JOIN DimGeography AS g ON g.geography_key = f.geography_key WHERE p.category_name LIKE '${category:pipe}' AND g.country LIKE '${country:pipe}' GROUP BY time ORDER BY time"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Orders",
+      "description": "Distinct order ids across the period. The fact grain is (order, product), so a row count would count order lines instead.",
+      "gridPos": { "h": 5, "w": 5, "x": 5, "y": 1 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-dw" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0,
+          "color": { "mode": "fixed", "fixedColor": "#5794F2" },
+          "custom": { "fillOpacity": 30 }
+        }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["sum"], "fields": "", "values": false },
+        "textMode": "value",
+        "graphMode": "area",
+        "colorMode": "value",
+        "justifyMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 0,
+          "queryType": "sql",
+          "rawSql": "SELECT toStartOfMonth(d.full_date) AS time, uniqExact(f.order_id) AS orders FROM v_FactOrders_Current AS f INNER JOIN DimDate AS d ON d.date_key = f.order_date_key INNER JOIN v_DimProducts_Current AS p ON p.product_key = f.product_key LEFT JOIN DimGeography AS g ON g.geography_key = f.geography_key WHERE p.category_name LIKE '${category:pipe}' AND g.country LIKE '${country:pipe}' GROUP BY time ORDER BY time"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Average order",
+      "description": "Revenue per order, aggregating lines to orders first and then averaging the monthly figures. Averaging line_total directly would give the average line, not the average order.",
+      "gridPos": { "h": 5, "w": 5, "x": 10, "y": 1 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-dw" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 1,
+          "color": { "mode": "fixed", "fixedColor": "#B877D9" },
+          "custom": { "fillOpacity": 30 }
+        }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["mean"], "fields": "", "values": false },
+        "textMode": "value",
+        "graphMode": "area",
+        "colorMode": "value",
+        "justifyMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 0,
+          "queryType": "sql",
+          "rawSql": "SELECT time, round(avg(order_total), 2) AS avg_order FROM (SELECT toStartOfMonth(d.full_date) AS time, f.order_id, sum(f.line_total) AS order_total FROM v_FactOrders_Current AS f INNER JOIN DimDate AS d ON d.date_key = f.order_date_key INNER JOIN v_DimProducts_Current AS p ON p.product_key = f.product_key LEFT JOIN DimGeography AS g ON g.geography_key = f.geography_key WHERE p.category_name LIKE '${category:pipe}' AND g.country LIKE '${country:pipe}' GROUP BY time, f.order_id) GROUP BY time ORDER BY time"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "gauge",
+      "title": "Fill rate",
+      "description": "Share of orders that shipped. An unshipped order carries shipped_date_key 0 — the deliberate miss value, not a null.",
+      "gridPos": { "h": 5, "w": 4, "x": 15, "y": 1 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-dw" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "decimals": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "#F2495C", "value": null },
+              { "color": "#FF9830", "value": 85 },
+              { "color": "#73BF69", "value": 95 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "values": false },
+        "showThresholdMarkers": true,
+        "showThresholdLabels": false
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT round(100 * uniqExactIf(order_id, shipped_date_key > 0) / uniqExact(order_id), 1) AS shipped_pct FROM v_FactOrders_Current"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Freight cost",
+      "description": "Freight belongs to the order but repeats on every line, so it is deduplicated per order before summing. Summing it directly multiplies it by the number of lines per order — the classic fan trap on a master/detail fact.",
+      "gridPos": { "h": 5, "w": 5, "x": 19, "y": 1 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-dw" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 0,
+          "color": { "mode": "fixed", "fixedColor": "#FF9830" }
+        }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "value",
+        "graphMode": "none",
+        "colorMode": "value",
+        "justifyMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT round(sum(freight), 0) AS freight FROM (SELECT DISTINCT order_id, freight FROM v_FactOrders_Current)"
+        }
+      ]
+    },
+
+    {
+      "id": 101,
+      "type": "row",
+      "title": "Trend",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 6 },
+      "collapsed": false
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Revenue and orders over time",
+      "description": "Revenue on the left axis, order count on the right. Joined to DimDate rather than deriving the month from order_date, so calendar attributes stay defined in one place.",
+      "gridPos": { "h": 10, "w": 15, "x": 0, "y": 7 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-dw" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 18,
+            "gradientMode": "opacity",
+            "showPoints": "auto",
+            "pointSize": 6,
+            "spanNulls": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Orders" },
+            "properties": [
+              { "id": "unit", "value": "none" },
+              { "id": "decimals", "value": 0 },
+              { "id": "custom.axisPlacement", "value": "right" },
+              { "id": "custom.fillOpacity", "value": 0 },
+              { "id": "custom.lineWidth", "value": 2 },
+              { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [8, 4] } },
+              { "id": "color", "value": { "mode": "fixed", "fixedColor": "#5794F2" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "Revenue" },
+            "properties": [
+              { "id": "color", "value": { "mode": "fixed", "fixedColor": "#73BF69" } }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true, "calcs": ["sum", "mean", "max"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 0,
+          "queryType": "sql",
+          "rawSql": "SELECT toStartOfMonth(d.full_date) AS time, round(sum(f.line_total), 0) AS \"Revenue\", uniqExact(f.order_id) AS \"Orders\" FROM v_FactOrders_Current AS f INNER JOIN DimDate AS d ON d.date_key = f.order_date_key INNER JOIN v_DimProducts_Current AS p ON p.product_key = f.product_key LEFT JOIN DimGeography AS g ON g.geography_key = f.geography_key WHERE p.category_name LIKE '${category:pipe}' AND g.country LIKE '${country:pipe}' GROUP BY time ORDER BY time"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "piechart",
+      "title": "Revenue by category",
+      "description": "Category lives on DimProducts rather than in a dimension of its own — the snowflake was flattened during staging.",
+      "gridPos": { "h": 10, "w": 9, "x": 15, "y": 7 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-dw" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 0
+        }
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right", "showLegend": true, "values": ["value"] },
+        "pieType": "donut",
+        "displayLabels": ["percent"],
+        "tooltip": { "mode": "single" },
+        "reduceOptions": { "calcs": ["lastNotNull"], "values": true }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT p.category_name AS category, round(sum(f.line_total), 0) AS revenue FROM v_FactOrders_Current AS f INNER JOIN v_DimProducts_Current AS p ON p.product_key = f.product_key LEFT JOIN DimGeography AS g ON g.geography_key = f.geography_key WHERE p.category_name LIKE '${category:pipe}' AND g.country LIKE '${country:pipe}' GROUP BY category ORDER BY revenue DESC"
+        }
+      ]
+    },
+
+    {
+      "id": 102,
+      "type": "row",
+      "title": "Breakdown",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 17 },
+      "collapsed": false
+    },
+    {
+      "id": 20,
+      "type": "bargauge",
+      "title": "Top 10 products",
+      "gridPos": { "h": 12, "w": 7, "x": 0, "y": 18 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-dw" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 0,
+          "color": { "mode": "continuous-GrYlRd" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+        }
+      },
+      "options": {
+        "displayMode": "gradient",
+        "orientation": "horizontal",
+        "showUnfilled": true,
+        "valueMode": "color",
+        "reduceOptions": { "calcs": ["lastNotNull"], "values": true }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT p.product_name AS product, round(sum(f.line_total), 0) AS revenue FROM v_FactOrders_Current AS f INNER JOIN v_DimProducts_Current AS p ON p.product_key = f.product_key LEFT JOIN DimGeography AS g ON g.geography_key = f.geography_key WHERE p.category_name LIKE '${category:pipe}' AND g.country LIKE '${country:pipe}' GROUP BY product ORDER BY revenue DESC LIMIT 10"
+        }
+      ]
+    },
+    {
+      "id": 21,
+      "type": "table",
+      "title": "Top customers",
+      "description": "Contact name is carried alongside the company so the table fills the width it is given rather than leaving the right half empty.",
+      "gridPos": { "h": 12, "w": 11, "x": 7, "y": 18 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-dw" },
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "auto", "minWidth": 60 } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "orders" },
+            "properties": [{ "id": "custom.width", "value": 70 }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "revenue" },
+            "properties": [
+              { "id": "unit", "value": "currencyUSD" },
+              { "id": "decimals", "value": 2 },
+              { "id": "custom.cellOptions", "value": { "type": "gauge", "mode": "gradient" } },
+              { "id": "custom.width", "value": 150 }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "footer": { "show": true, "reducer": ["sum"], "fields": ["revenue"], "countRows": false },
+        "sortBy": [{ "displayName": "revenue", "desc": true }]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT c.company_name AS customer, c.contact_name AS contact, g.country AS country, uniqExact(f.order_id) AS orders, round(sum(f.line_total), 2) AS revenue FROM v_FactOrders_Current AS f INNER JOIN v_DimCustomer_Current AS c ON c.customer_key = f.customer_key INNER JOIN v_DimProducts_Current AS p ON p.product_key = f.product_key LEFT JOIN DimGeography AS g ON g.geography_key = c.geography_key WHERE p.category_name LIKE '${category:pipe}' GROUP BY customer, contact, country ORDER BY revenue DESC LIMIT 12"
+        }
+      ]
+    },
+    {
+      "id": 22,
+      "type": "barchart",
+      "title": "Orders by day of week",
+      "description": "Day names come from DimDate rather than being derived per query, which is the point of having a date dimension. Saturday and Sunday show zero: Northwind's orders were only ever placed on weekdays, and a visible gap says more than a missing bar.",
+      "gridPos": { "h": 12, "w": 6, "x": 18, "y": 18 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-dw" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0,
+          "color": { "mode": "continuous-BlPu" },
+          "custom": { "fillOpacity": 85, "gradientMode": "hue", "lineWidth": 0 }
+        }
+      },
+      "options": {
+        "orientation": "horizontal",
+        "xTickLabelRotation": 0,
+        "legend": { "showLegend": false },
+        "tooltip": { "mode": "single" }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT d.day_of_week_name AS day, countIf(f.order_id != 0) AS orders FROM DimDate AS d LEFT JOIN (SELECT DISTINCT order_id, order_date_key FROM v_FactOrders_Current) AS f ON f.order_date_key = d.date_key WHERE d.full_date BETWEEN toDate('1996-07-01') AND toDate('1998-05-31') GROUP BY day, d.day_of_week ORDER BY d.day_of_week"
+        }
+      ]
+    },
+
+    {
+      "id": 103,
+      "type": "row",
+      "title": "Seasonality",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 30 },
+      "collapsed": true,
+      "panels": [
+        {
+          "id": 30,
+          "type": "barchart",
+          "title": "Revenue by season",
+          "description": "Labelled with the year because the seasons repeat across the dataset — bare season names would put three winters side by side with no way to tell them apart.",
+          "gridPos": { "h": 9, "w": 12, "x": 0, "y": 31 },
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-dw" },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "currencyUSD",
+              "decimals": 1,
+              "color": { "mode": "fixed", "fixedColor": "#73BF69" },
+              "custom": { "fillOpacity": 100, "gradientMode": "opacity", "lineWidth": 1 }
+            }
+          },
+          "options": {
+            "orientation": "vertical",
+            "xTickLabelRotation": -45,
+            "showValue": "auto",
+            "legend": { "showLegend": false },
+            "tooltip": { "mode": "single" }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "format": 1,
+              "queryType": "sql",
+              "rawSql": "SELECT concat(toString(d.calendar_year), ' ', d.season_name) AS period, round(sum(f.line_total), 1) AS revenue FROM v_FactOrders_Current AS f INNER JOIN DimDate AS d ON d.date_key = f.order_date_key GROUP BY period, d.calendar_year, d.calendar_season ORDER BY d.calendar_year, d.calendar_season"
+            }
+          ]
+        },
+        {
+          "id": 31,
+          "type": "timeseries",
+          "title": "Monthly order volume",
+          "gridPos": { "h": 9, "w": 12, "x": 12, "y": 31 },
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-dw" },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "decimals": 0,
+              "color": { "mode": "fixed", "fixedColor": "#FADE2A" },
+              "custom": { "drawStyle": "bars", "fillOpacity": 70, "lineWidth": 1, "gradientMode": "hue" }
+            }
+          },
+          "options": {
+            "legend": { "showLegend": false },
+            "tooltip": { "mode": "single" }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "format": 0,
+              "queryType": "sql",
+              "rawSql": "SELECT toStartOfMonth(d.full_date) AS time, uniqExact(f.order_id) AS orders FROM v_FactOrders_Current AS f INNER JOIN DimDate AS d ON d.date_key = f.order_date_key GROUP BY time ORDER BY time"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

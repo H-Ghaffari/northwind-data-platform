@@ -1,0 +1,358 @@
+{
+  "uid": "nw-workforce-geo",
+  "title": "Northwind — Workforce & Geography",
+  "description": "Sales by person and by place. The org chart is reconstructed from parent_employee_key, a surrogate key resolved in a second pass because a manager's row may not exist when their reports are loaded. Photo paths come from the data lake, joined on employee code.",
+  "tags": ["northwind", "workforce", "geography"],
+  "timezone": "browser",
+  "style": "dark",
+  "editable": true,
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "time": { "from": "1996-07-01T00:00:00.000Z", "to": "1998-05-31T23:59:59.000Z" },
+  "templating": {
+    "list": [
+      {
+        "name": "region",
+        "label": "Country",
+        "type": "query",
+        "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-dw" },
+        "query": "SELECT DISTINCT country FROM DimGeography FINAL WHERE country != '' ORDER BY country",
+        "multi": true,
+        "includeAll": true,
+        "allValue": "%",
+        "current": { "text": ["All"], "value": ["$__all"] },
+        "refresh": 1
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 100,
+      "type": "row",
+      "title": "Workforce",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "collapsed": false
+    },
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Employees",
+      "gridPos": { "h": 5, "w": 4, "x": 0, "y": 1 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-dw" },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "#5794F2" } }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "values": false },
+        "textMode": "value_and_name",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT count() AS \"Employees\" FROM v_DimEmployees_Current"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Managers",
+      "description": "Employees who appear as somebody's parent_employee_key.",
+      "gridPos": { "h": 5, "w": 4, "x": 4, "y": 1 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-dw" },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "#B877D9" } }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "values": false },
+        "textMode": "value_and_name",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT uniqExactIf(parent_employee_key, parent_employee_key > 0) AS \"Managers\" FROM v_DimEmployees_Current"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Territories covered",
+      "gridPos": { "h": 5, "w": 4, "x": 8, "y": 1 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-dw" },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "#73BF69" } }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "values": false },
+        "textMode": "value_and_name",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT uniqExact(territory_key) AS \"Territories\" FROM FactEmployeeTerritories FINAL"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Countries served",
+      "gridPos": { "h": 5, "w": 4, "x": 12, "y": 1 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-dw" },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "#FADE2A" } }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "values": false },
+        "textMode": "value_and_name",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT uniqExact(g.country) AS \"Countries\" FROM v_FactOrders_Current AS f INNER JOIN DimGeography AS g ON g.geography_key = f.geography_key WHERE g.country != ''"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Lake photos",
+      "description": "Files catalogued in LakeEmployeePhotos. The bytes live on disk; only the path and checksum are in the warehouse.",
+      "gridPos": { "h": 5, "w": 4, "x": 16, "y": 1 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-dw" },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "#FF780A" } }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "values": false },
+        "textMode": "value_and_name",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT count() AS \"Photos\" FROM LakeEmployeePhotos FINAL"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Avg tenure",
+      "description": "Years since hire, measured against the last order in the data rather than today — the dataset ends in 1998.",
+      "gridPos": { "h": 5, "w": 4, "x": 20, "y": 1 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-dw" },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "decimals": 1, "color": { "mode": "fixed", "fixedColor": "#F2CC0C" } }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "values": false },
+        "textMode": "value_and_name",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT round(avg(dateDiff('year', hire_date, toDate('1998-05-06'))), 1) AS \"Years\" FROM v_DimEmployees_Current WHERE hire_date IS NOT NULL"
+        }
+      ]
+    },
+
+    {
+      "id": 101,
+      "type": "row",
+      "title": "Sales by person",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 6 },
+      "collapsed": false
+    },
+    {
+      "id": 10,
+      "type": "bargauge",
+      "title": "Revenue per employee",
+      "gridPos": { "h": 11, "w": 9, "x": 0, "y": 7 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-dw" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 0,
+          "color": { "mode": "continuous-BlYlRd" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] }
+        }
+      },
+      "options": {
+        "displayMode": "gradient",
+        "orientation": "horizontal",
+        "showUnfilled": true,
+        "valueMode": "color",
+        "reduceOptions": { "calcs": ["lastNotNull"], "values": true }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT e.full_name AS employee, round(sum(f.line_total), 0) AS revenue FROM v_FactOrders_Current AS f INNER JOIN v_DimEmployees_Current AS e ON e.employee_key = f.employee_key LEFT JOIN DimGeography AS g ON g.geography_key = f.geography_key WHERE g.country LIKE '${region:pipe}' GROUP BY employee ORDER BY revenue DESC"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "table",
+      "title": "Org chart and performance",
+      "description": "manager is resolved through parent_employee_key — a surrogate key, filled in a second pass because a manager's row may not exist when their reports are first loaded. Andrew Fuller is the root and has none.",
+      "gridPos": { "h": 11, "w": 15, "x": 9, "y": 7 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-dw" },
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "auto" } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "revenue" },
+            "properties": [
+              { "id": "unit", "value": "currencyUSD" },
+              { "id": "decimals", "value": 0 },
+              { "id": "custom.cellOptions", "value": { "type": "gauge", "mode": "gradient" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "manager" },
+            "properties": [{ "id": "custom.cellOptions", "value": { "type": "color-text" } }]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "footer": { "show": true, "reducer": ["sum"], "fields": ["revenue", "orders"] },
+        "sortBy": [{ "displayName": "revenue", "desc": true }]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT e.full_name AS employee, e.title AS title, coalesce(m.full_name, '— root —') AS manager, uniqExact(f.order_id) AS orders, round(sum(f.line_total), 0) AS revenue FROM v_FactOrders_Current AS f INNER JOIN v_DimEmployees_Current AS e ON e.employee_key = f.employee_key LEFT JOIN v_DimEmployees_Current AS m ON m.employee_key = e.parent_employee_key GROUP BY employee, title, manager ORDER BY revenue DESC"
+        }
+      ]
+    },
+
+    {
+      "id": 102,
+      "type": "row",
+      "title": "Geography",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 18 },
+      "collapsed": false
+    },
+    {
+      "id": 20,
+      "type": "barchart",
+      "title": "Revenue by shipping country",
+      "gridPos": { "h": 11, "w": 12, "x": 0, "y": 19 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-dw" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "color": { "mode": "continuous-GrYlRd" },
+          "custom": { "fillOpacity": 85, "gradientMode": "scheme", "lineWidth": 0 }
+        }
+      },
+      "options": {
+        "orientation": "horizontal",
+        "legend": { "showLegend": false },
+        "tooltip": { "mode": "single" }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT g.country AS country, round(sum(f.line_total), 0) AS revenue FROM v_FactOrders_Current AS f INNER JOIN DimGeography AS g ON g.geography_key = f.geography_key WHERE g.country != '' GROUP BY country ORDER BY revenue DESC LIMIT 15"
+        }
+      ]
+    },
+    {
+      "id": 21,
+      "type": "table",
+      "title": "Territory coverage",
+      "description": "The factless fact table at work: FactEmployeeTerritories records that a relationship exists, with no measure of its own.",
+      "gridPos": { "h": 11, "w": 12, "x": 12, "y": 19 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-dw" },
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "auto" } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "territories" },
+            "properties": [
+              { "id": "custom.cellOptions", "value": { "type": "gauge", "mode": "lcd" } },
+              { "id": "color", "value": { "mode": "continuous-BlPu" } }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "sortBy": [{ "displayName": "territories", "desc": true }]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT e.full_name AS employee, e.title AS title, count() AS territories, groupArray(t.region_description)[1] AS primary_region FROM FactEmployeeTerritories AS b FINAL INNER JOIN v_DimEmployees_Current AS e ON e.employee_key = b.employee_key INNER JOIN v_DimTerritories_Current AS t ON t.territory_key = b.territory_key GROUP BY employee, title ORDER BY territories DESC"
+        }
+      ]
+    },
+
+    {
+      "id": 103,
+      "type": "row",
+      "title": "Data lake",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 30 },
+      "collapsed": true,
+      "panels": [
+        {
+          "id": 30,
+          "type": "table",
+          "title": "Employee profile — warehouse text, lake files",
+          "description": "The join the brief describes: attributes from the star schema, file location from the lake, employee_code linking the two. The image bytes are never stored in a column.",
+          "gridPos": { "h": 10, "w": 24, "x": 0, "y": 31 },
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-dw" },
+          "fieldConfig": {
+            "defaults": { "custom": { "align": "auto" } },
+            "overrides": [
+              {
+                "matcher": { "id": "byName", "options": "size_bytes" },
+                "properties": [{ "id": "unit", "value": "decbytes" }]
+              }
+            ]
+          },
+          "options": { "showHeader": true },
+          "targets": [
+            {
+              "refId": "A",
+              "format": 1,
+              "queryType": "sql",
+              "rawSql": "SELECT employee_code, full_name, title, country, city, file_path, size_bytes FROM v_EmployeeProfile ORDER BY employee_code"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

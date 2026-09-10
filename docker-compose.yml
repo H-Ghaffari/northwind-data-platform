@@ -257,7 +257,7 @@ services:
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER}
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
-      GF_USERS_DEFAULT_THEME: light
+      GF_USERS_DEFAULT_THEME: dark
       GF_PATHS_PLUGINS: /opt/grafana/plugins
       # Consumed by the provisioned datasource, so connection details stay
       # in .env rather than being duplicated into a committed YAML file.

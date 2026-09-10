@@ -1,0 +1,399 @@
+{
+  "uid": "nw-pipeline-health",
+  "title": "Northwind — Pipeline Health",
+  "description": "Whether the warehouse can be trusted right now: row counts against expectations, unresolved foreign keys, outstanding inferred members, CDC watermark position and merge state. A revenue figure is worth nothing without something watching whether the data behind it is complete.",
+  "tags": ["northwind", "operations", "data-quality"],
+  "timezone": "browser",
+  "style": "dark",
+  "editable": true,
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "time": { "from": "now-24h", "to": "now" },
+  "panels": [
+    {
+      "id": 100,
+      "type": "row",
+      "title": "Integrity",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "collapsed": false
+    },
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Fact rows",
+      "description": "Expected 2155 for the unmodified Northwind sample.",
+      "gridPos": { "h": 5, "w": 4, "x": 0, "y": 1 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-dw" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "#F2495C", "value": null },
+              { "color": "#73BF69", "value": 1 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "values": false },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value_and_name"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT count() AS \"Fact rows\" FROM v_FactOrders_Current"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Unresolved products",
+      "description": "Facts pointing at product_key 0 — the lookup found nothing and no inferred member was created. Should always be zero.",
+      "gridPos": { "h": 5, "w": 4, "x": 4, "y": 1 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-dw" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "#73BF69", "value": null },
+              { "color": "#F2495C", "value": 1 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "values": false },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value_and_name"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT count() AS \"Unresolved\" FROM v_FactOrders_Current WHERE product_key = 0"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Unresolved customers",
+      "gridPos": { "h": 5, "w": 4, "x": 8, "y": 1 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-dw" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "#73BF69", "value": null },
+              { "color": "#F2495C", "value": 1 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "values": false },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value_and_name"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT count() AS \"Unresolved\" FROM v_FactOrders_Current WHERE customer_key = 0"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Inferred members",
+      "description": "Dimension stubs created by the fact load and not yet enriched. A few between runs is normal; a number that keeps climbing means the dimension load is not keeping up.",
+      "gridPos": { "h": 5, "w": 4, "x": 12, "y": 1 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-dw" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "#73BF69", "value": null },
+              { "color": "#FF9830", "value": 1 },
+              { "color": "#F2495C", "value": 10 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "values": false },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value_and_name"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT (SELECT count() FROM v_DimProducts_Current WHERE product_name = '') + (SELECT count() FROM v_DimCustomer_Current WHERE company_name = '') + (SELECT count() FROM v_DimEmployees_Current WHERE full_name = '') AS \"Stubs\""
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Tombstoned",
+      "description": "Rows marked deleted by CDC. Kept rather than removed, so a delete stays auditable.",
+      "gridPos": { "h": 5, "w": 4, "x": 16, "y": 1 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-dw" },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "#8AB8FF" } }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "values": false },
+        "graphMode": "none",
+        "textMode": "value_and_name"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT count() AS \"Tombstoned\" FROM FactOrders FINAL WHERE is_deleted = 1"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "History rows",
+      "description": "Closed SCD type 2 versions. Growth here is history being kept, not a fault.",
+      "gridPos": { "h": 5, "w": 4, "x": 20, "y": 1 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-dw" },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "#B877D9" } }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "values": false },
+        "graphMode": "none",
+        "textMode": "value_and_name"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT (SELECT count() FROM DimProducts FINAL WHERE end_date != toDateTime('2106-01-01 00:00:00')) + (SELECT count() FROM DimCustomer FINAL WHERE end_date != toDateTime('2106-01-01 00:00:00')) + (SELECT count() FROM DimEmployees FINAL WHERE end_date != toDateTime('2106-01-01 00:00:00')) + (SELECT count() FROM DimSuppliers FINAL WHERE end_date != toDateTime('2106-01-01 00:00:00')) AS \"Closed\""
+        }
+      ]
+    },
+
+    {
+      "id": 101,
+      "type": "row",
+      "title": "Reconciliation",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 6 },
+      "collapsed": false
+    },
+    {
+      "id": 10,
+      "type": "table",
+      "title": "Row counts against expectations",
+      "description": "Current rows against the count for an unmodified Northwind. A mismatch here is the first thing to check when a figure elsewhere looks wrong.",
+      "gridPos": { "h": 12, "w": 12, "x": 0, "y": 7 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-dw" },
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "auto" } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "status" },
+            "properties": [
+              { "id": "custom.cellOptions", "value": { "type": "color-background", "mode": "basic" } },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "OK": { "color": "#73BF69", "index": 0 },
+                      "MISMATCH": { "color": "#F2495C", "index": 1 }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "options": { "showHeader": true, "sortBy": [{ "displayName": "status", "desc": true }] },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT name, actual, expected, actual - expected AS delta, if(actual = expected, 'OK', 'MISMATCH') AS status FROM (SELECT 'DimGeography' AS name, toInt64((SELECT count() FROM DimGeography FINAL)) AS actual, toInt64(135) AS expected UNION ALL SELECT 'DimShippers', toInt64((SELECT count() FROM DimShippers FINAL)), toInt64(3) UNION ALL SELECT 'DimTerritories', toInt64((SELECT count() FROM v_DimTerritories_Current)), toInt64(53) UNION ALL SELECT 'DimSuppliers', toInt64((SELECT count() FROM v_DimSuppliers_Current)), toInt64(29) UNION ALL SELECT 'DimCustomer', toInt64((SELECT count() FROM v_DimCustomer_Current)), toInt64(91) UNION ALL SELECT 'DimProducts', toInt64((SELECT count() FROM v_DimProducts_Current)), toInt64(77) UNION ALL SELECT 'DimEmployees', toInt64((SELECT count() FROM v_DimEmployees_Current)), toInt64(9) UNION ALL SELECT 'DimDate', toInt64((SELECT count() FROM DimDate FINAL)), toInt64(16801) UNION ALL SELECT 'FactEmployeeTerritories', toInt64((SELECT count() FROM FactEmployeeTerritories FINAL)), toInt64(49) UNION ALL SELECT 'FactOrders', toInt64((SELECT count() FROM v_FactOrders_Current)), toInt64(2155) UNION ALL SELECT 'LakeEmployeePhotos', toInt64((SELECT count() FROM LakeEmployeePhotos FINAL)), toInt64(9)) ORDER BY status DESC, name"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "table",
+      "title": "Storage and merge state",
+      "description": "Parts per table. ReplacingMergeTree deduplicates during background merges, so a high part count means reads without FINAL may still see duplicates.",
+      "gridPos": { "h": 12, "w": 12, "x": 12, "y": 7 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-dw" },
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "auto" } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "size" },
+            "properties": [{ "id": "unit", "value": "decbytes" }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "rows_on_disk" },
+            "properties": [
+              { "id": "custom.cellOptions", "value": { "type": "gauge", "mode": "gradient" } },
+              { "id": "color", "value": { "mode": "continuous-BlPu" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "parts" },
+            "properties": [
+              { "id": "custom.cellOptions", "value": { "type": "color-text" } },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    { "color": "#73BF69", "value": null },
+                    { "color": "#FF9830", "value": 30 },
+                    { "color": "#F2495C", "value": 100 }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": { "showHeader": true, "sortBy": [{ "displayName": "rows_on_disk", "desc": true }] },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT table, sum(rows) AS rows_on_disk, count() AS parts, sum(bytes_on_disk) AS size FROM system.parts WHERE database = currentDatabase() AND active GROUP BY table ORDER BY rows_on_disk DESC"
+        }
+      ]
+    },
+
+    {
+      "id": 102,
+      "type": "row",
+      "title": "Load pattern",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 19 },
+      "collapsed": false
+    },
+    {
+      "id": 20,
+      "type": "timeseries",
+      "title": "Orders loaded per month",
+      "description": "Distribution of what is actually in the warehouse. A month that suddenly empties points at a load that failed, not a quiet month.",
+      "gridPos": { "h": 10, "w": 16, "x": 0, "y": 20 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-dw" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": { "mode": "continuous-GrYlRd" },
+          "custom": { "drawStyle": "bars", "fillOpacity": 80, "lineWidth": 1, "gradientMode": "scheme" }
+        }
+      },
+      "options": {
+        "legend": { "showLegend": false },
+        "tooltip": { "mode": "single" }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 0,
+          "queryType": "sql",
+          "rawSql": "SELECT toStartOfMonth(d.full_date) AS time, uniqExact(f.order_id) AS orders FROM v_FactOrders_Current AS f INNER JOIN DimDate AS d ON d.date_key = f.order_date_key GROUP BY time ORDER BY time"
+        }
+      ]
+    },
+    {
+      "id": 21,
+      "type": "bargauge",
+      "title": "Partition sizes",
+      "description": "FactOrders is partitioned by order month, so a query filtered on a date range skips whole partitions rather than scanning them.",
+      "gridPos": { "h": 10, "w": 8, "x": 16, "y": 20 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-dw" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": { "mode": "continuous-BlYlRd" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] }
+        }
+      },
+      "options": {
+        "displayMode": "lcd",
+        "orientation": "horizontal",
+        "showUnfilled": true,
+        "valueMode": "color",
+        "reduceOptions": { "calcs": ["lastNotNull"], "values": true }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT partition, sum(rows) AS rows FROM system.parts WHERE database = currentDatabase() AND table = 'FactOrders' AND active GROUP BY partition ORDER BY partition DESC LIMIT 12"
+        }
+      ]
+    },
+
+    {
+      "id": 103,
+      "type": "row",
+      "title": "Dimension history",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 30 },
+      "collapsed": true,
+      "panels": [
+        {
+          "id": 30,
+          "type": "table",
+          "title": "SCD type 2 versions",
+          "description": "Every closed row is a change the warehouse chose to keep rather than overwrite. An empty table means nothing has changed since the initial load, not that history is broken.",
+          "gridPos": { "h": 10, "w": 24, "x": 0, "y": 31 },
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-dw" },
+          "fieldConfig": {
+            "defaults": { "custom": { "align": "auto" } }
+          },
+          "options": { "showHeader": true },
+          "targets": [
+            {
+              "refId": "A",
+              "format": 1,
+              "queryType": "sql",
+              "rawSql": "SELECT 'DimProducts' AS dimension, toString(product_alternate_key) AS source_key, product_name AS label, start_date, end_date FROM DimProducts FINAL WHERE end_date != toDateTime('2106-01-01 00:00:00') UNION ALL SELECT 'DimCustomer', customer_alternate_key, company_name, start_date, end_date FROM DimCustomer FINAL WHERE end_date != toDateTime('2106-01-01 00:00:00') UNION ALL SELECT 'DimEmployees', toString(employee_alternate_key), full_name, start_date, end_date FROM DimEmployees FINAL WHERE end_date != toDateTime('2106-01-01 00:00:00') UNION ALL SELECT 'DimSuppliers', toString(supplier_alternate_key), company_name, start_date, end_date FROM DimSuppliers FINAL WHERE end_date != toDateTime('2106-01-01 00:00:00') ORDER BY end_date DESC LIMIT 50"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

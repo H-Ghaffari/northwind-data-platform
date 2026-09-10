@@ -1,0 +1,328 @@
+{
+  "uid": "nw-customer-product",
+  "title": "Northwind — Customer & Product Analysis",
+  "description": "Who buys, what they buy, and what the warehouse knows about both. Discontinued products are surfaced rather than hidden: historical orders still point at them, and removing the row would orphan those facts.",
+  "tags": ["northwind", "analysis", "customer", "product"],
+  "timezone": "browser",
+  "style": "dark",
+  "editable": true,
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "time": { "from": "1996-07-01T00:00:00.000Z", "to": "1998-05-31T23:59:59.000Z" },
+  "templating": {
+    "list": [
+      {
+        "name": "top_n",
+        "label": "Show top",
+        "type": "custom",
+        "query": "5,10,15,20,25",
+        "current": { "text": "10", "value": "10" },
+        "options": [
+          { "text": "5", "value": "5" },
+          { "text": "10", "value": "10", "selected": true },
+          { "text": "15", "value": "15" },
+          { "text": "20", "value": "20" },
+          { "text": "25", "value": "25" }
+        ]
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 100,
+      "type": "row",
+      "title": "Catalogue health",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "collapsed": false
+    },
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Active products",
+      "gridPos": { "h": 5, "w": 4, "x": 0, "y": 1 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-dw" },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "#73BF69" } }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "values": false },
+        "textMode": "value_and_name",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT count() AS \"Active\" FROM v_DimProducts_Current WHERE discontinued = 0"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Discontinued",
+      "description": "Kept in the dimension rather than deleted: historical orders still point at them.",
+      "gridPos": { "h": 5, "w": 4, "x": 4, "y": 1 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-dw" },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "#FF9830" } }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "values": false },
+        "textMode": "value_and_name",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT count() AS \"Discontinued\" FROM v_DimProducts_Current WHERE discontinued = 1"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Customers",
+      "gridPos": { "h": 5, "w": 4, "x": 8, "y": 1 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-dw" },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "#5794F2" } }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "values": false },
+        "textMode": "value_and_name",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT count() AS \"Customers\" FROM v_DimCustomer_Current"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Buying customers",
+      "description": "Customers with at least one order. The gap against the total is dormant accounts, not a data problem.",
+      "gridPos": { "h": 5, "w": 4, "x": 12, "y": 1 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-dw" },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "#B877D9" } }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "values": false },
+        "textMode": "value_and_name",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT uniqExact(customer_key) AS \"Buying\" FROM v_FactOrders_Current"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Suppliers",
+      "gridPos": { "h": 5, "w": 4, "x": 16, "y": 1 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-dw" },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "#FADE2A" } }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "values": false },
+        "textMode": "value_and_name",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT count() AS \"Suppliers\" FROM v_DimSuppliers_Current"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Avg unit price",
+      "gridPos": { "h": 5, "w": 4, "x": 20, "y": 1 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-dw" },
+      "fieldConfig": {
+        "defaults": { "unit": "currencyUSD", "decimals": 2, "color": { "mode": "fixed", "fixedColor": "#FF780A" } }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "values": false },
+        "textMode": "value_and_name",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT round(avg(unit_price), 2) AS \"Avg price\" FROM v_DimProducts_Current WHERE discontinued = 0"
+        }
+      ]
+    },
+
+    {
+      "id": 101,
+      "type": "row",
+      "title": "Product mix",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 6 },
+      "collapsed": false
+    },
+    {
+      "id": 10,
+      "type": "table",
+      "title": "Category performance",
+      "description": "Revenue rendered as an in-cell gauge, so the shape is readable without reading the numbers.",
+      "gridPos": { "h": 10, "w": 12, "x": 0, "y": 7 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-dw" },
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "auto" } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "revenue" },
+            "properties": [
+              { "id": "unit", "value": "currencyUSD" },
+              { "id": "decimals", "value": 0 },
+              { "id": "custom.cellOptions", "value": { "type": "gauge", "mode": "gradient" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "avg_price" },
+            "properties": [
+              { "id": "unit", "value": "currencyUSD" },
+              { "id": "decimals", "value": 2 }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "footer": { "show": true, "reducer": ["sum"], "fields": ["revenue", "units"] },
+        "sortBy": [{ "displayName": "revenue", "desc": true }]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT p.category_name AS category, count(DISTINCT p.product_key) AS products, sum(f.quantity) AS units, round(avg(f.unit_price), 2) AS avg_price, round(sum(f.line_total), 0) AS revenue FROM v_FactOrders_Current AS f INNER JOIN v_DimProducts_Current AS p ON p.product_key = f.product_key GROUP BY category ORDER BY revenue DESC"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "barchart",
+      "title": "Units sold by category",
+      "gridPos": { "h": 10, "w": 12, "x": 12, "y": 7 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-dw" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": { "mode": "continuous-GrYlRd" },
+          "custom": { "fillOpacity": 85, "gradientMode": "scheme", "lineWidth": 0 }
+        }
+      },
+      "options": {
+        "orientation": "horizontal",
+        "legend": { "showLegend": false },
+        "tooltip": { "mode": "single" }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT p.category_name AS category, sum(f.quantity) AS units FROM v_FactOrders_Current AS f INNER JOIN v_DimProducts_Current AS p ON p.product_key = f.product_key GROUP BY category ORDER BY units DESC"
+        }
+      ]
+    },
+
+    {
+      "id": 102,
+      "type": "row",
+      "title": "Customers",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 17 },
+      "collapsed": false
+    },
+    {
+      "id": 20,
+      "type": "table",
+      "title": "Customer detail",
+      "gridPos": { "h": 12, "w": 14, "x": 0, "y": 18 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-dw" },
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "auto" } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "revenue" },
+            "properties": [
+              { "id": "unit", "value": "currencyUSD" },
+              { "id": "decimals", "value": 0 },
+              { "id": "custom.cellOptions", "value": { "type": "gauge", "mode": "gradient" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "avg_order" },
+            "properties": [
+              { "id": "unit", "value": "currencyUSD" },
+              { "id": "decimals", "value": 0 }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "sortBy": [{ "displayName": "revenue", "desc": true }]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT c.company_name AS customer, c.contact_name AS contact, g.country AS country, uniqExact(f.order_id) AS orders, round(sum(f.line_total), 0) AS revenue, round(sum(f.line_total) / uniqExact(f.order_id), 0) AS avg_order FROM v_FactOrders_Current AS f INNER JOIN v_DimCustomer_Current AS c ON c.customer_key = f.customer_key LEFT JOIN DimGeography AS g ON g.geography_key = c.geography_key GROUP BY customer, contact, country ORDER BY revenue DESC LIMIT $top_n"
+        }
+      ]
+    },
+    {
+      "id": 21,
+      "type": "piechart",
+      "title": "Revenue concentration",
+      "description": "How much of the total comes from the largest accounts. A steep pie means the business leans on a handful of customers.",
+      "gridPos": { "h": 12, "w": 10, "x": 14, "y": 18 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-dw" },
+      "fieldConfig": {
+        "defaults": { "unit": "currencyUSD", "decimals": 0 }
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right", "showLegend": true, "values": ["percent"] },
+        "pieType": "pie",
+        "displayLabels": ["percent"],
+        "reduceOptions": { "calcs": ["lastNotNull"], "values": true }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT customer, revenue FROM (SELECT c.company_name AS customer, round(sum(f.line_total), 0) AS revenue FROM v_FactOrders_Current AS f INNER JOIN v_DimCustomer_Current AS c ON c.customer_key = f.customer_key GROUP BY customer ORDER BY revenue DESC LIMIT $top_n)"
+        }
+      ]
+    }
+  ]
+}
