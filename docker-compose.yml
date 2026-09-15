@@ -1,10 +1,20 @@
 name: northwind-data-platform
 
 # ---------------------------------------------------------------------------
-# Northwind Data Platform — Batch pipeline (Airflow method)
+# Northwind Data Platform
 #
-#   OP (SQL Server) --> Staging (PostgreSQL) --> DW (ClickHouse) --> Grafana
-#                              orchestrated by Airflow
+#   Batch path      (profile: batch)
+#     OP (SQL Server) -> Staging (PostgreSQL) -> DW (ClickHouse) -> Grafana
+#     orchestrated by Airflow, PySpark inside PythonOperator
+#
+#   Streaming path  (profile: stream)
+#     OP (SQL Server) -> CDC producer -> Kafka -> consumer -> DW_RT (ClickHouse)
+#     every applied event mirrored into MongoDB as an audit document
+#
+#   Services declared without a `profiles:` key belong to both paths and are
+#   started by every `docker compose up`. The two paths together need more
+#   memory than a 16 GB machine has, so `scripts/mode.sh` switches between
+#   them rather than running both.
 # ---------------------------------------------------------------------------
 
 networks:
@@ -17,6 +27,7 @@ volumes:
   airflow_meta_data:
   dw_data:
   grafana_data:
+  mongo_data:
 
 # Shared configuration for every Airflow service, declared once.
 x-airflow-common: &airflow-common
@@ -34,26 +45,22 @@ x-airflow-common: &airflow-common
     AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "true"
     AIRFLOW__WEBSERVER__DEFAULT_UI_TIMEZONE: ${AIRFLOW_TIMEZONE}
     AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: "true"
-
     # --- Connection details consumed by our own DAG code ---
     OP_HOST: northwind_op
     OP_PORT: "1433"
     OP_DB: ${OP_DB}
     OP_USER: sa
     OP_PASSWORD: ${MSSQL_SA_PASSWORD}
-
     STAGING_HOST: northwind_staging
     STAGING_PORT: "5432"
     STAGING_DB: ${STAGING_DB}
     STAGING_USER: ${STAGING_USER}
     STAGING_PASSWORD: ${STAGING_PASSWORD}
-
     DW_HOST: northwind_dw
     DW_HTTP_PORT: "8123"
     DW_DB: ${DW_DB}
     DW_USER: ${CLICKHOUSE_USER}
     DW_PASSWORD: ${CLICKHOUSE_PASSWORD}
-
     JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
     SPARK_JARS_DIR: /opt/spark-jars
     LAKE_ROOT: /data/lake
@@ -69,6 +76,10 @@ x-airflow-common: &airflow-common
     - northwind_net
 
 services:
+
+  # =========================================================================
+  # SHARED — started by both paths
+  # =========================================================================
 
   # -------------------------------------------------------------------------
   # OP layer — the operational source system (Northwind + ETL_Settings)
@@ -87,7 +98,7 @@ services:
       - op_data:/var/opt/mssql
       - ./docker/sqlserver/backup:/var/opt/mssql/backup
       - ./sql/01_op:/opt/sql/01_op:ro
-      - ./sql/04_etl_settings:/opt/sql/04_etl_settings:ro 
+      - ./sql/04_etl_settings:/opt/sql/04_etl_settings:ro
     mem_limit: 2g
     networks:
       - northwind_net
@@ -102,11 +113,89 @@ services:
       start_period: 60s
 
   # -------------------------------------------------------------------------
+  # DW layer — batch star schema (NorthwindDW) and streaming target
+  # (NorthwindRT) live on the same server, in separate databases
+  # -------------------------------------------------------------------------
+  northwind_dw:
+    image: clickhouse/clickhouse-server:latest
+    container_name: northwind_dw
+    environment:
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+      CLICKHOUSE_DB: ${DW_DB}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    ports:
+      - "${DW_HTTP_EXTERNAL_PORT}:8123"    # HTTP — Grafana, clickhouse-connect
+      - "${DW_NATIVE_EXTERNAL_PORT}:9000"  # native — clickhouse-client
+    volumes:
+      - dw_data:/var/lib/clickhouse
+      - ./sql/03_dw:/opt/sql/03_dw:ro
+      - ./sql/05_dw_rt:/opt/sql/05_dw_rt:ro
+    mem_limit: 2g
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    networks:
+      - northwind_net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # -------------------------------------------------------------------------
+  # Presentation layer
+  # -------------------------------------------------------------------------
+  grafana:
+    build:
+      context: ./docker/grafana
+      dockerfile: Dockerfile
+    image: northwind/grafana:11.6.0
+    container_name: grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+      GF_USERS_DEFAULT_THEME: dark
+      GF_PATHS_PLUGINS: /opt/grafana/plugins
+      # Consumed by the provisioned datasource, so connection details stay
+      # in .env rather than being duplicated into a committed YAML file.
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+      DW_DB: ${DW_DB}
+      DW_RT_DB: ${DW_RT_DB}
+    ports:
+      - "${GRAFANA_EXTERNAL_PORT}:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+    mem_limit: 512m
+    depends_on:
+      northwind_dw:
+        condition: service_healthy
+    networks:
+      - northwind_net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # =========================================================================
+  # BATCH PATH — phase 1 (profile: batch)
+  # =========================================================================
+
+  # -------------------------------------------------------------------------
   # Staging layer — integration area, truncated and refilled on every run
   # -------------------------------------------------------------------------
   northwind_staging:
     image: postgres:15
     container_name: northwind_staging
+    profiles: ["batch"]
     environment:
       POSTGRES_USER: ${STAGING_USER}
       POSTGRES_PASSWORD: ${STAGING_PASSWORD}
@@ -132,6 +221,7 @@ services:
   airflow_meta:
     image: postgres:15
     container_name: airflow_meta
+    profiles: ["batch"]
     environment:
       POSTGRES_USER: ${AIRFLOW_META_USER}
       POSTGRES_PASSWORD: ${AIRFLOW_META_PASSWORD}
@@ -149,42 +239,12 @@ services:
       retries: 5
 
   # -------------------------------------------------------------------------
-  # DW layer — the star schema, optimised for reporting
-  # -------------------------------------------------------------------------
-  northwind_dw:
-    image: clickhouse/clickhouse-server:latest
-    container_name: northwind_dw
-    environment:
-      CLICKHOUSE_USER: ${CLICKHOUSE_USER}
-      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
-      CLICKHOUSE_DB: ${DW_DB}
-      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
-    ports:
-      - "${DW_HTTP_EXTERNAL_PORT}:8123"   # HTTP  — Grafana, clickhouse-connect
-      - "${DW_NATIVE_EXTERNAL_PORT}:9000" # native — clickhouse-client
-    volumes:
-      - dw_data:/var/lib/clickhouse
-      - ./sql/03_dw:/opt/sql/03_dw:ro
-    mem_limit: 2g
-    ulimits:
-      nofile:
-        soft: 262144
-        hard: 262144
-    networks:
-      - northwind_net
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  # -------------------------------------------------------------------------
   # Airflow — one-shot initialisation (migrations + admin user)
   # -------------------------------------------------------------------------
   airflow_init:
     <<: *airflow-common
     container_name: airflow_init
+    profiles: ["batch"]
     depends_on:
       airflow_meta:
         condition: service_healthy
@@ -210,6 +270,7 @@ services:
   airflow_webserver:
     <<: *airflow-common
     container_name: airflow_webserver
+    profiles: ["batch"]
     command: webserver
     ports:
       - "${AIRFLOW_EXTERNAL_PORT}:8080"
@@ -231,6 +292,7 @@ services:
   airflow_scheduler:
     <<: *airflow-common
     container_name: airflow_scheduler
+    profiles: ["batch"]
     command: scheduler
     depends_on:
       airflow_init:
@@ -244,42 +306,100 @@ services:
       retries: 5
       start_period: 60s
 
-  # -------------------------------------------------------------------------
-  # Presentation layer
-  # -------------------------------------------------------------------------
+  # =========================================================================
+  # STREAMING PATH — phase 2 (profile: stream)
+  # =========================================================================
 
-  grafana:
-    build:
-      context: ./docker/grafana
-      dockerfile: Dockerfile
-    image: northwind/grafana:11.6.0
-    container_name: grafana
+  # -------------------------------------------------------------------------
+  # Kafka — KRaft mode, single combined broker + controller node
+  #
+  # No data volume by design. Kafka is transport here, not the system of
+  # record: the source of truth is SQL Server's CDC log and the replay
+  # position lives in ETL_Settings. A lost broker log is replayed, not lost.
+  # -------------------------------------------------------------------------
+  kafka:
+    image: apache/kafka:4.0.0
+    container_name: kafka
+    profiles: ["stream"]
     environment:
-      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER}
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
-      GF_USERS_DEFAULT_THEME: dark
-      GF_PATHS_PLUGINS: /opt/grafana/plugins
-      # Consumed by the provisioned datasource, so connection details stay
-      # in .env rather than being duplicated into a committed YAML file.
-      CLICKHOUSE_USER: ${CLICKHOUSE_USER}
-      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
-      DW_DB: ${DW_DB}
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      # Fixed id, so KRaft formats storage once and never asks again.
+      CLUSTER_ID: ${KAFKA_CLUSTER_ID}
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      # INTERNAL is what containers use; EXTERNAL is what the host uses.
+      # One listener cannot serve both, because the advertised hostname
+      # differs: `kafka` inside the network, `localhost` outside it.
+      KAFKA_LISTENERS: INTERNAL://:9092,CONTROLLER://:9093,EXTERNAL://:29092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,EXTERNAL://localhost:${KAFKA_EXTERNAL_PORT}
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      # Single node, so nothing can be replicated anywhere.
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      # Topics are declared explicitly, so a typo in a topic name fails
+      # loudly instead of quietly creating an empty topic nobody reads.
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_LOG_RETENTION_HOURS: 168
     ports:
-      - "${GRAFANA_EXTERNAL_PORT}:3000"
-    volumes:
-      - grafana_data:/var/lib/grafana
-      - ./grafana/provisioning:/etc/grafana/provisioning
-      - ./grafana/dashboards:/var/lib/grafana/dashboards
-    mem_limit: 512m
-    depends_on:
-      northwind_dw:
-        condition: service_healthy
+      - "${KAFKA_EXTERNAL_PORT}:29092"
+    mem_limit: 1g
     networks:
       - northwind_net
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:3000/api/health || exit 1"]
-      interval: 30s
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  # -------------------------------------------------------------------------
+  # Kafka UI — read topics, partitions, lag and message payloads in a browser
+  # -------------------------------------------------------------------------
+  kafka_ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka_ui
+    profiles: ["stream"]
+    environment:
+      KAFKA_CLUSTERS_0_NAME: northwind
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      DYNAMIC_CONFIG_ENABLED: "true"
+    ports:
+      - "${KAFKA_UI_EXTERNAL_PORT}:8080"
+    mem_limit: 512m
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - northwind_net
+    restart: unless-stopped
+
+  # -------------------------------------------------------------------------
+  # MongoDB — audit log of every event the consumer applies
+  # -------------------------------------------------------------------------
+  northwind_audit:
+    image: mongo:7
+    container_name: northwind_audit
+    profiles: ["stream"]
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD}
+      MONGO_INITDB_DATABASE: ${MONGO_DB}
+    ports:
+      - "${MONGO_EXTERNAL_PORT}:27017"
+    volumes:
+      - mongo_data:/data/db
+    mem_limit: 512m
+    networks:
+      - northwind_net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 15s
       timeout: 10s
       retries: 5
-      start_period: 30s
+      start_period: 20s
