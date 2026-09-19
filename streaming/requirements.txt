@@ -1,0 +1,4 @@
+confluent-kafka==2.6.1
+pymssql==2.3.2
+clickhouse-connect==0.8.15
+pymongo==4.10.1

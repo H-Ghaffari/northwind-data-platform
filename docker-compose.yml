@@ -403,3 +403,40 @@ services:
       timeout: 10s
       retries: 5
       start_period: 20s
+
+  # -------------------------------------------------------------------------
+  # CDC producer — polls the capture instances and publishes to Kafka
+  # -------------------------------------------------------------------------
+  cdc_producer:
+    build:
+      context: .
+      dockerfile: docker/streaming/Dockerfile
+    image: northwind/streaming:1.0
+    container_name: cdc_producer
+    profiles: ["stream"]
+    command: ["python", "-m", "streaming.producer.main"]
+    environment:
+      OP_HOST: northwind_op
+      OP_PORT: "1433"
+      OP_DB: ${OP_DB}
+      OP_USER: sa
+      OP_PASSWORD: ${MSSQL_SA_PASSWORD}
+      ETL_SETTINGS_DB: ETL_Settings
+      KAFKA_BOOTSTRAP: kafka:9092
+      KAFKA_TOPIC_PREFIX: ${KAFKA_TOPIC_PREFIX}
+      STREAM_POLL_SECONDS: ${STREAM_POLL_SECONDS:-5}
+      STREAM_MAX_ROWS: ${STREAM_MAX_ROWS:-5000}
+      LOG_LEVEL: INFO
+    volumes:
+      # Mounted so an edit is one `docker compose restart` away rather than
+      # a rebuild. The image still carries a copy, so it runs standalone.
+      - ./streaming:/app/streaming:ro
+    mem_limit: 512m
+    depends_on:
+      kafka:
+        condition: service_healthy
+      northwind_op:
+        condition: service_healthy
+    networks:
+      - northwind_net
+    restart: unless-stopped

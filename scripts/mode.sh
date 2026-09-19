@@ -17,7 +17,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 BATCH_SERVICES=(northwind_staging airflow_meta airflow_webserver airflow_scheduler)
-STREAM_SERVICES=(kafka kafka_ui northwind_audit)
+STREAM_SERVICES=(kafka kafka_ui northwind_audit cdc_producer)
 
 stop_services() {
   local label="$1"; shift
