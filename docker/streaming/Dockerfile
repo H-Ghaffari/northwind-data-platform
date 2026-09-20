@@ -25,6 +25,7 @@ COPY streaming /app/streaming
 # container runs standalone; also mounted in compose so an edit does not
 # need a rebuild.
 COPY shared /app/shared
+ENV PYTHONPATH=/app/shared
 
 # Not root. Nothing here needs privileges, and the container has a live
 # connection to the source database.

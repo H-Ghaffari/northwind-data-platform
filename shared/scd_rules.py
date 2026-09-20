@@ -85,6 +85,10 @@ class Dimension:
     start_date: str = "start_date"
     end_date: str = "end_date"
     version_column: str = "_version"
+    # FactOrders records a delete as a tombstone; no dimension does, because
+    # the brief does not carry dimension deletes into the warehouse at all.
+    # Named here so a dimension that later gains one is expressible, and
+    # checked against the table before use rather than assumed.
     deleted_column: str = "is_deleted"
 
     @property

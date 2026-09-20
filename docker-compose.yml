@@ -443,3 +443,44 @@ services:
     networks:
       - northwind_net
     restart: unless-stopped
+
+      # -------------------------------------------------------------------------
+  # Consumer — applies Kafka events to the streaming warehouse
+  #
+  # The brief calls this the staging of the streaming path, and it is: with
+  # no staging database, the type coercion, null normalisation, lookup
+  # resolution and SCD rules staging performed all happen here, per event.
+  #
+  # One replica, deliberately. Surrogate keys are allocated in memory from a
+  # maximum read at startup, and a second instance would hand out keys the
+  # first had already used.
+  # -------------------------------------------------------------------------
+  cdc_consumer:
+    build:
+      context: .
+      dockerfile: docker/streaming/Dockerfile
+    image: northwind/streaming:1.0
+    container_name: cdc_consumer
+    profiles: ["stream"]
+    command: ["python", "-m", "streaming.consumer.main"]
+    environment:
+      KAFKA_BOOTSTRAP: kafka:9092
+      DW_HOST: northwind_dw
+      DW_HTTP_PORT: "8123"
+      DW_RT_DB: ${DW_RT_DB}
+      DW_USER: ${CLICKHOUSE_USER}
+      DW_PASSWORD: ${CLICKHOUSE_PASSWORD}
+      PYTHONPATH: /app/shared
+      LOG_LEVEL: INFO
+    volumes:
+      - ./streaming:/app/streaming:ro
+      - ./shared:/app/shared:ro
+    mem_limit: 512m
+    depends_on:
+      kafka:
+        condition: service_healthy
+      northwind_dw:
+        condition: service_healthy
+    networks:
+      - northwind_net
+    restart: unless-stopped
