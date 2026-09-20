@@ -192,16 +192,17 @@ def load_customers(spark: SparkSession) -> int:
 # ---------------------------------------------------------------------------
 
 def load_employees(spark: SparkSession) -> int:
-    """Employees, with two derived columns.
+    """Employees, with one derived column.
 
-    full_name and age do not exist in the source. They are computed here, in
-    the integration layer, so every downstream consumer sees one definition
-    instead of inventing its own.
+    full_name does not exist in the source. It is computed here, in the
+    integration layer, so every downstream consumer sees one definition
+    instead of inventing its own. It changes only when a name changes, which
+    is a real event the source reports.
 
-    age is derived from birth_date at load time, which means it is only
-    correct as of the last run. That is the accepted trade-off for a
-    dimension attribute; a report needing exact current age should compute
-    it from birth_date directly.
+    age is not computed here. It is an ALIAS on DimEmployees, evaluated by
+    ClickHouse at read time — a stored age would be correct on the day it
+    was written and wrong from the next birthday on, with nothing to
+    correct it.
 
     BirthDate, HireDate and ReportsTo stay nullable. An unknown date is not
     1900-01-01, and a null ReportsTo means "reports to nobody" — the root of
@@ -218,7 +219,6 @@ def load_employees(spark: SparkSession) -> int:
             ISNULL(Title,'')           AS Title,
             ISNULL(TitleOfCourtesy,'') AS TitleOfCourtesy,
             BirthDate,
-            DATEDIFF(YEAR, BirthDate, GETDATE()) AS Age,
             HireDate,
             ISNULL(Address,'')    AS Address,
             ISNULL(City,'')       AS City,
@@ -234,7 +234,7 @@ def load_employees(spark: SparkSession) -> int:
     """
     df = read_from_op(spark, query).toDF(
         "employee_id", "last_name", "first_name", "full_name",
-        "title", "title_of_courtesy", "birth_date", "age", "hire_date",
+        "title", "title_of_courtesy", "birth_date", "hire_date",
         "address", "city", "region", "postal_code", "country",
         "home_phone", "extension", "notes", "reports_to", "photo_path",
     )

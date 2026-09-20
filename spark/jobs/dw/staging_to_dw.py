@@ -376,7 +376,7 @@ def load_dim_employees(spark: SparkSession) -> int:
         "       first_name, last_name, full_name, "
         "       COALESCE(title,'')             AS title, "
         "       COALESCE(title_of_courtesy,'') AS title_of_courtesy, "
-        "       birth_date, COALESCE(age, 0) AS age, hire_date, "
+        "       birth_date, hire_date, "
         "       COALESCE(home_phone,'') AS home_phone, "
         "       COALESCE(extension,'')  AS extension, "
         "       COALESCE(notes,'')      AS notes, "
@@ -399,7 +399,7 @@ def load_dim_employees(spark: SparkSession) -> int:
         spark, "DimEmployees",
         ["employee_key", "employee_alternate_key", "reports_to", "geography_key",
          "first_name", "last_name", "full_name", "title", "title_of_courtesy",
-         "birth_date", "age", "hire_date", "home_phone", "extension", "notes",
+         "birth_date", "hire_date", "home_phone", "extension", "notes",
          "photo_path", "start_date", "end_date"],
     )
 
@@ -409,7 +409,7 @@ def load_dim_employees(spark: SparkSession) -> int:
         # BirthDate sits in the type 1 list because the reference package
         # puts it there: a wrong date of birth is a correction, not history.
         type1_columns=["first_name", "last_name", "full_name", "title_of_courtesy",
-                       "birth_date", "age", "hire_date", "home_phone", "extension",
+                       "birth_date", "hire_date", "home_phone", "extension",
                        "photo_path"],
         type2_columns=["title", "geography_key", "reports_to", "notes"],
         run_time=run_time,
@@ -422,7 +422,7 @@ def load_dim_employees(spark: SparkSession) -> int:
         changes=changes,
         payload_columns=["reports_to", "geography_key", "first_name", "last_name",
                          "full_name", "title", "title_of_courtesy", "birth_date",
-                         "age", "hire_date", "home_phone", "extension", "notes",
+                         "hire_date", "home_phone", "extension", "notes",
                          "photo_path"],
         run_time=run_time,
         extra_defaults={"parent_employee_key": 0},
@@ -444,7 +444,7 @@ def resolve_employee_hierarchy(spark: SparkSession) -> int:
         result = client.query(
             "SELECT employee_key, employee_alternate_key, parent_employee_key, "
             "       reports_to, geography_key, first_name, last_name, full_name, "
-            "       title, title_of_courtesy, birth_date, age, hire_date, "
+            "       title, title_of_courtesy, birth_date, hire_date, "
             "       home_phone, extension, notes, photo_path, start_date, end_date "
             "FROM DimEmployees FINAL "
             "WHERE end_date = toDateTime('2106-01-01 00:00:00')"
@@ -459,7 +459,7 @@ def resolve_employee_hierarchy(spark: SparkSession) -> int:
 
     columns = ["employee_key", "employee_alternate_key", "parent_employee_key",
                "reports_to", "geography_key", "first_name", "last_name", "full_name",
-               "title", "title_of_courtesy", "birth_date", "age", "hire_date",
+               "title", "title_of_courtesy", "birth_date", "hire_date",
                "home_phone", "extension", "notes", "photo_path",
                "start_date", "end_date"]
 
