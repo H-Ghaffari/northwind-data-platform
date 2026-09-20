@@ -41,7 +41,10 @@ def handle_dimension(ch, envelope: dict, applied_at: dt.datetime) -> tuple[str, 
     # since been superseded.
     lookups.clear_surrogate(dim.table, incoming[dim.alternate_key])
 
-    return outcome, insert_rows(ch, dim.table, rows)
+    written = insert_rows(ch, dim.table, rows)
+    if dim.table == "DimEmployees" and outcome != "unchanged":
+        written += resolve_hierarchy(ch, applied_at)
+    return outcome, written
 
 
 def handle_reference(ch, envelope: dict, applied_at: dt.datetime) -> tuple[str, int]:
@@ -93,3 +96,43 @@ def handle_reference(ch, envelope: dict, applied_at: dt.datetime) -> tuple[str, 
     log.info("%s %s -> %s cascaded to %s rows in %s",
              table, old_name, new_name, written - 1, dim_table)
     return "type2", written
+
+def resolve_hierarchy(ch, applied_at: dt.datetime) -> int:
+    """Fill in parent_employee_key, in both directions.
+
+    parent_employee_key holds the manager's *surrogate* key, which cannot be
+    resolved while the manager's own row may not exist yet. The batch load
+    runs two passes for this; a stream has no passes, so each employee event
+    does the same work reactively: resolve this row's manager if it can, and
+    resolve any subordinate that was waiting for this row.
+
+    Andrew Fuller is the root and keeps parent_employee_key = 0.
+    """
+    from .warehouse import VERSIONS
+
+    columns = [name for name, _ in stored_columns(ch, "DimEmployees")]
+
+    rows = ch.query(
+        f"SELECT {', '.join(columns)} FROM DimEmployees FINAL "
+        f"WHERE parent_employee_key = 0 AND reports_to != 0 "
+        f"AND end_date = toDateTime('2106-01-01 00:00:00')"
+    ).result_rows
+
+    fixed = 0
+    for values in rows:
+        row = dict(zip(columns, values))
+        manager = lookups.surrogate_key_any(
+            ch, "DimEmployees", "employee_alternate_key", row["reports_to"])
+        if not manager:
+            continue
+
+        # Same key, same start_date, higher version: a resolution corrects a
+        # value that was never right, rather than versioning one that was.
+        row["parent_employee_key"] = manager
+        row["_version"] = VERSIONS.take()
+        insert_rows(ch, "DimEmployees", [row])
+        fixed += 1
+
+    if fixed:
+        log.info("resolved parent_employee_key for %s employee(s)", fixed)
+    return fixed

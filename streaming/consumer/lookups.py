@@ -140,3 +140,45 @@ def rows_referencing(ch, table: str, column: str, value: str) -> list[dict]:
         parameters={"v": value},
     ).result_rows
     return [dict(zip(columns, r)) for r in rows]
+
+def surrogate_key_any(ch, table: str, alternate_column: str, value) -> int:
+    """The surrogate key of the open row of any dimension, or 0.
+
+    Wider than surrogate_key() above, which knows only the two dimensions the
+    dimension loader looks up. The fact load can reach any of them, and the
+    key column name follows from the table rather than needing a case.
+    """
+    if value in (None, "", 0):
+        return 0
+
+    cache_key = (table, str(value))
+    if cache_key in _surrogate:
+        return _surrogate[cache_key]
+
+    from .inferred import KEY_COLUMNS
+    key_column = KEY_COLUMNS[table][0]
+
+    # A dimension with no type 2 attribute has no validity dates and exactly
+    # one row per key, so there is nothing to filter on.
+    has_history = ch.query(
+        "SELECT count() FROM system.columns "
+        "WHERE database = currentDatabase() AND table = {t:String} "
+        "AND name = 'end_date'",
+        parameters={"t": table},
+    ).result_rows[0][0]
+
+    predicate = " AND end_date = toDateTime('2106-01-01 00:00:00')" if has_history else ""
+
+    rows = ch.query(
+        f"SELECT {key_column} FROM {table} FINAL "
+        f"WHERE {alternate_column} = {{k:String}}{predicate}",
+        parameters={"k": str(value)},
+    ).result_rows
+
+    key = int(rows[0][0]) if rows else 0
+
+    # A miss is not cached. The row it was looking for is usually moments
+    # away, and a cached zero would outlive the gap it describes.
+    if key:
+        _surrogate[cache_key] = key
+    return key

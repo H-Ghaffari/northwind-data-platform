@@ -17,8 +17,8 @@ from confluent_kafka import Consumer, KafkaError
 from scd_rules import DIMENSIONS, validate
 
 from ..common.config import KAFKA
-from . import handlers, telemetry
 from .warehouse import KEYS, client
+from . import facts, handlers, telemetry
 
 logging.basicConfig(
     level=os.environ.get("LOG_LEVEL", "INFO"),
@@ -27,13 +27,15 @@ logging.basicConfig(
 )
 log = logging.getLogger("consumer")
 
-# Facts arrive on their own topics and are handled in a later step. Listing
-# only what this stage applies means an unhandled topic keeps its offsets
-# instead of being consumed and discarded.
 TOPICS = [
+    # Reference and dimension sources first, though Kafka gives no
+    # cross-topic ordering — a fact arriving before its dimension creates an
+    # inferred member, which is designed behaviour rather than a race to be
+    # avoided.
     "nw.cdc.categories", "nw.cdc.region",
     "nw.cdc.suppliers", "nw.cdc.shippers", "nw.cdc.territories",
     "nw.cdc.customers", "nw.cdc.products", "nw.cdc.employees",
+    "nw.cdc.orders", "nw.cdc.order_details", "nw.cdc.employee_territories",
 ]
 
 SURROGATE_KEYS = {
@@ -100,10 +102,21 @@ def main() -> int:
         target = envelope["target_table"]
 
         try:
+            # Dispatch on capture instance, not target table: Orders and
+            # Order Details both write to FactOrders but do opposite things
+            # — one fans a header out to its lines, the other writes one line.
+            instance = envelope["capture_instance"]
+
             if target in DIMENSIONS:
                 outcome, rows = handlers.handle_dimension(ch, envelope, applied_at)
             elif target in handlers.REFERENCE:
                 outcome, rows = handlers.handle_reference(ch, envelope, applied_at)
+            elif instance == "dbo_Orders":
+                outcome, rows = facts.handle_order(ch, envelope, applied_at)
+            elif instance == "dbo_OrderDetails":
+                outcome, rows = facts.handle_order_detail(ch, envelope, applied_at)
+            elif instance == "dbo_EmployeeTerritories":
+                outcome, rows = facts.handle_employee_territory(ch, envelope, applied_at)
             else:
                 outcome, rows = "skipped", 0
 
