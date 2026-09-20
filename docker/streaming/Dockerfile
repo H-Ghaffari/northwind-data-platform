@@ -21,6 +21,11 @@ RUN pip install --no-cache-dir -r /app/requirements.txt
 
 COPY streaming /app/streaming
 
+# The SCD contract, shared with the batch path. Copied into the image so the
+# container runs standalone; also mounted in compose so an edit does not
+# need a rebuild.
+COPY shared /app/shared
+
 # Not root. Nothing here needs privileges, and the container has a live
 # connection to the source database.
 RUN useradd --create-home --uid 1000 stream

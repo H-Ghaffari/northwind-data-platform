@@ -64,6 +64,7 @@ x-airflow-common: &airflow-common
     JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
     SPARK_JARS_DIR: /opt/spark-jars
     LAKE_ROOT: /data/lake
+    PYTHONPATH: /opt/shared:/opt/spark-jobs
   volumes:
     - ./airflow/dags:/opt/airflow/dags
     - ./airflow/plugins:/opt/airflow/plugins
@@ -71,6 +72,7 @@ x-airflow-common: &airflow-common
     - ./spark:/opt/spark-jobs
     - ./sql:/opt/sql
     - ./data/lake:/data/lake
+    - ./shared:/opt/shared:ro
   user: "${AIRFLOW_UID:-50000}:0"
   networks:
     - northwind_net
@@ -431,6 +433,7 @@ services:
       # Mounted so an edit is one `docker compose restart` away rather than
       # a rebuild. The image still carries a copy, so it runs standalone.
       - ./streaming:/app/streaming:ro
+      - ./shared:/app/shared:ro
     mem_limit: 512m
     depends_on:
       kafka:
