@@ -1,0 +1,43 @@
+{
+  "index_patterns": ["northwind-audit-*"],
+  "priority": 200,
+  "_meta": {
+    "description": "Audit log of every event the streaming consumer applied. Types are declared rather than inferred: dynamic mapping would take the first document's guess as law, and the first order event would make business_key a number that every order-line event then fails to match."
+  },
+  "template": {
+    "settings": {
+      "number_of_shards": 1,
+      "number_of_replicas": 0
+    },
+    "mappings": {
+      "dynamic": false,
+      "properties": {
+        "@timestamp":       { "type": "date" },
+        "applied_at":       { "type": "date" },
+        "source_time":      { "type": "date" },
+        "lag_ms":           { "type": "long" },
+        "rows_written":     { "type": "integer" },
+
+        "capture_instance": { "type": "keyword" },
+        "source_table":     { "type": "keyword" },
+        "target_table":     { "type": "keyword" },
+        "operation":        { "type": "keyword" },
+        "outcome":          { "type": "keyword" },
+        "business_key":     { "type": "keyword" },
+        "lsn":              { "type": "keyword" },
+
+        "kafka": {
+          "properties": {
+            "topic":     { "type": "keyword" },
+            "partition": { "type": "integer" },
+            "offset":    { "type": "long" }
+          }
+        },
+
+        "data":             { "type": "flattened" },
+        "error":            { "type": "text" },
+        "tags":             { "type": "keyword" }
+      }
+    }
+  }
+}

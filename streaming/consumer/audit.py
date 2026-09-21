@@ -21,6 +21,7 @@ import datetime as dt
 import logging
 import os
 import time
+import json
 
 from pymongo import ASCENDING, MongoClient
 from pymongo.errors import PyMongoError
@@ -79,7 +80,7 @@ def _events():
 def record(envelope: dict, applied_at: dt.datetime, outcome: str,
            rows: int, msg, error: str = "") -> None:
     source_time = dt.datetime.fromisoformat(envelope["source_time"])
-    _buffer.append({
+    doc = {
         "applied_at": applied_at,
         "source_time": source_time,
         "lag_ms": int((applied_at - source_time).total_seconds() * 1000),
@@ -95,7 +96,28 @@ def record(envelope: dict, applied_at: dt.datetime, outcome: str,
         "lsn": envelope.get("lsn", ""),
         "data": envelope.get("data", {}),
         "error": error,
-    })
+    }
+
+    # The same document again, as one JSON string. It exists for Logstash.
+    #
+    # The MongoDB input flattens documents and guesses types as it goes: any
+    # string that looks like a number becomes one. An LSN loses its leading
+    # zeros and stops identifying a transaction, a postcode of "05021"
+    # becomes 5021, and a business key is a number for an order but a string
+    # for an order line — which Elasticsearch then rejects as a type
+    # conflict. An index template cannot restore digits that were dropped
+    # before the document reached it.
+    #
+    # JSON carries its types with it, so the pipeline parses this field and
+    # discards the plugin's guesses. The structured fields above stay, since
+    # they are what makes the collection queryable from mongosh.
+    doc["payload"] = json.dumps({
+        **{k: v for k, v in doc.items() if k not in ("applied_at", "source_time")},
+        "applied_at": applied_at.isoformat(timespec="milliseconds"),
+        "source_time": source_time.isoformat(timespec="milliseconds"),
+    }, ensure_ascii=False, default=str)
+
+    _buffer.append(doc)
 
 
 def flush(force: bool = False) -> None:

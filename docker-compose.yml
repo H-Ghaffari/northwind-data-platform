@@ -28,6 +28,8 @@ volumes:
   dw_data:
   grafana_data:
   mongo_data:
+  es_data:
+  logstash_data:
 
 # Shared configuration for every Airflow service, declared once.
 x-airflow-common: &airflow-common
@@ -482,6 +484,105 @@ services:
       kafka:
         condition: service_healthy
       northwind_dw:
+        condition: service_healthy
+      northwind_audit:
+        condition: service_healthy
+    networks:
+      - northwind_net
+    restart: unless-stopped
+
+  # -------------------------------------------------------------------------
+  # Elasticsearch — searchable copy of the audit log, and the store Kibana
+  # reads. Single node, security off: this is a development stack on a
+  # private compose network, and TLS plus enrollment tokens would add setup
+  # the brief does not ask for. A production deployment would keep both on.
+  # -------------------------------------------------------------------------
+  elasticsearch:
+    image: elasticsearch:9.5.3
+    container_name: elasticsearch
+    profiles: ["stream"]
+    environment:
+      cluster.name: northwind-audit
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      xpack.security.enrollment.enabled: "false"
+      # Fixed heap, and equal min and max so the JVM never pauses to resize.
+      ES_JAVA_OPTS: -Xms1g -Xmx1g
+      # Elasticsearch marks every index read-only once the disk passes 95%,
+      # and a developer laptop's WSL disk gets there easily. The failure is
+      # silent — writes are refused, nothing crashes — so the check is off
+      # here. It must stay on anywhere the disk actually matters.
+      cluster.routing.allocation.disk.threshold_enabled: "false"
+    ulimits:
+      memlock: { soft: -1, hard: -1 }
+      nofile: { soft: 65536, hard: 65536 }
+    ports:
+      - "${ES_EXTERNAL_PORT}:9200"
+    volumes:
+      - es_data:/usr/share/elasticsearch/data
+    mem_limit: 2g
+    networks:
+      - northwind_net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:9200/_cluster/health | grep -qv '\"status\":\"red\"'"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 60s
+
+  # -------------------------------------------------------------------------
+  # Kibana — search and dashboards over the audit log
+  # -------------------------------------------------------------------------
+  kibana:
+    image: kibana:9.5.3
+    container_name: kibana
+    profiles: ["stream"]
+    environment:
+      ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+      SERVER_NAME: kibana
+      TELEMETRY_OPTIN: "false"
+    ports:
+      - "${KIBANA_EXTERNAL_PORT}:5601"
+    mem_limit: 1g
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    networks:
+      - northwind_net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:5601/api/status | grep -q '\"level\":\"available\"'"]
+      interval: 20s
+      timeout: 10s
+      retries: 20
+      start_period: 90s
+
+  # -------------------------------------------------------------------------
+  # Logstash — ships the MongoDB audit log into Elasticsearch
+  #
+  # The MongoDB input is a community plugin, installed at build time. It
+  # was smoke-tested against this Logstash and this MongoDB before anything
+  # was built on it; its type-guessing is worked around rather than trusted.
+  # -------------------------------------------------------------------------
+  logstash:
+    build:
+      context: ./docker/logstash
+    image: northwind/logstash:9.5.3
+    container_name: logstash
+    profiles: ["stream"]
+    environment:
+      LS_JAVA_OPTS: -Xms512m -Xmx512m
+      MONGO_USER: ${MONGO_USER}
+      MONGO_PASSWORD: ${MONGO_PASSWORD}
+      MONGO_DB: ${MONGO_DB}
+    volumes:
+      - ./elk/logstash/pipeline:/usr/share/logstash/pipeline:ro
+      - ./elk/logstash/templates:/usr/share/logstash/templates:ro
+      - logstash_data:/usr/share/logstash/data
+    mem_limit: 1g
+    depends_on:
+      elasticsearch:
         condition: service_healthy
       northwind_audit:
         condition: service_healthy
