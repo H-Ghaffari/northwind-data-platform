@@ -214,6 +214,7 @@ def main() -> int:
 
     log.info("flushing before exit")
     producer.flush(timeout=30)
+    db.close_all()
     log.info("producer stopped")
     return 0
 

@@ -26,22 +26,67 @@ def _require_safe(identifier: str) -> str:
     return identifier
 
 
-@contextmanager
-def connect(database: str) -> Iterator[pymssql.Connection]:
-    conn = pymssql.connect(
+# One long-lived connection per database, reopened only after a failure.
+_connections: dict[str, pymssql.Connection] = {}
+
+
+def _open(database: str) -> pymssql.Connection:
+    return pymssql.connect(
         server=OP.host,
         port=str(OP.port),
         user=OP.user,
         password=OP.password,
         database=database,
+        # Autocommit matters more with a long-lived connection than a short
+        # one: an implicit transaction left open would hold its locks for
+        # the life of the process instead of the life of one query.
         autocommit=True,
         timeout=30,
         login_timeout=15,
     )
+
+
+@contextmanager
+def connect(database: str) -> Iterator[pymssql.Connection]:
+    """A reused connection to one database.
+
+    The first version opened and closed a connection for every query. Each
+    pass issues at least twelve, and every one paid for a TCP handshake,
+    encryption negotiation and a login before running anything. Packetbeat
+    recorded the result on an idle system: about 8,300 connections and
+    200 KB/s to SQL Server — the cost of asking "anything new?" was mostly
+    the cost of saying hello. With the connections reused it is two
+    connections and about 14 KB/s. Nothing functional showed the problem;
+    data arrived correctly and on time. Only watching the wire did.
+
+    On any error the connection is discarded and the next call reconnects.
+    That covers a restarted SQL Server as well as a connection left in an
+    unknown state by a failed statement, and a reconnect is cheap next to
+    reasoning about which failures leave a connection reusable.
+    """
+    conn = _connections.get(database)
+    if conn is None:
+        conn = _open(database)
+        _connections[database] = conn
     try:
         yield conn
-    finally:
-        conn.close()
+    except Exception:
+        _connections.pop(database, None)
+        try:
+            conn.close()
+        except Exception:  # noqa: BLE001
+            pass
+        raise
+
+
+def close_all() -> None:
+    """Close every pooled connection. Called once, at shutdown."""
+    for database, conn in list(_connections.items()):
+        try:
+            conn.close()
+        except Exception:  # noqa: BLE001
+            pass
+        _connections.pop(database, None)
 
 
 # ---------------------------------------------------------------------------
