@@ -472,6 +472,8 @@ services:
       DW_PASSWORD: ${CLICKHOUSE_PASSWORD}
       PYTHONPATH: /app/shared
       LOG_LEVEL: INFO
+      MONGO_URI: mongodb://${MONGO_USER}:${MONGO_PASSWORD}@northwind_audit:27017/?authSource=admin
+      MONGO_DB: ${MONGO_DB}
     volumes:
       - ./streaming:/app/streaming:ro
       - ./shared:/app/shared:ro
@@ -480,6 +482,8 @@ services:
       kafka:
         condition: service_healthy
       northwind_dw:
+        condition: service_healthy
+      northwind_audit:
         condition: service_healthy
     networks:
       - northwind_net

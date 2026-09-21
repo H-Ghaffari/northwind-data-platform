@@ -18,7 +18,7 @@ from scd_rules import DIMENSIONS, validate
 
 from ..common.config import KAFKA
 from .warehouse import KEYS, client
-from . import facts, handlers, telemetry
+from . import facts, handlers, telemetry, audit
 
 logging.basicConfig(
     level=os.environ.get("LOG_LEVEL", "INFO"),
@@ -91,6 +91,7 @@ def main() -> int:
 
         if msg is None:
             telemetry.flush(ch)
+            audit.flush()
             continue
         if msg.error():
             if msg.error().code() != KafkaError._PARTITION_EOF:
@@ -121,6 +122,7 @@ def main() -> int:
                 outcome, rows = "skipped", 0
 
             telemetry.event(envelope, applied_at, outcome, rows, msg)
+            audit.record(envelope, applied_at, outcome, rows, msg)
 
             if outcome not in ("unchanged", "skipped"):
                 log.info("%s %s %s -> %s rows",
@@ -135,11 +137,15 @@ def main() -> int:
             # of recording it there rather than only in the container log.
             log.exception("%s %s failed", target, envelope.get("business_key"))
             telemetry.event(envelope, applied_at, "error", 0, msg, str(exc)[:500])
+            audit.record(envelope, applied_at, "error", 0, msg, str(exc)[:500])
             telemetry.flush(ch, force=True)
+            audit.flush(force=True)
 
         telemetry.flush(ch)
+        audit.flush()
 
     telemetry.flush(ch, force=True)
+    audit.flush(force=True)
     consumer.close()
     ch.close()
     log.info("consumer stopped")
