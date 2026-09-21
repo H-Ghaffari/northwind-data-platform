@@ -30,6 +30,7 @@ volumes:
   mongo_data:
   es_data:
   logstash_data:
+  packetbeat_data:
 
 # Shared configuration for every Airflow service, declared once.
 x-airflow-common: &airflow-common
@@ -588,4 +589,40 @@ services:
         condition: service_healthy
     networks:
       - northwind_net
+    restart: unless-stopped
+
+  # -------------------------------------------------------------------------
+  # Packetbeat — sniffs the producer's network traffic
+  #
+  # Shares the producer's network namespace rather than having one of its
+  # own, so it sees the producer's connections to SQL Server and Kafka as if
+  # it were the producer. The price: recreating cdc_producer leaves this
+  # container attached to a namespace that no longer exists, and it has to
+  # be recreated too — `docker compose up -d --force-recreate packetbeat`.
+  #
+  # Root and two capabilities, because opening a raw socket is a privileged
+  # operation. Nothing else runs as root in this stack.
+  # -------------------------------------------------------------------------
+  packetbeat:
+    image: elastic/packetbeat:9.5.3
+    container_name: packetbeat
+    profiles: ["stream"]
+    user: root
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    network_mode: "service:cdc_producer"
+    # strict.perms off: the config is bind-mounted from the host and owned by
+    # the host user, and a Beat running as root refuses a config it does not
+    # own. The file is read-only inside the container either way.
+    command: ["-e", "--strict.perms=false"]
+    volumes:
+      - ./elk/packetbeat/packetbeat.yml:/usr/share/packetbeat/packetbeat.yml:ro
+      - packetbeat_data:/usr/share/packetbeat/data
+    mem_limit: 256m
+    depends_on:
+      cdc_producer:
+        condition: service_started
+      elasticsearch:
+        condition: service_healthy
     restart: unless-stopped
