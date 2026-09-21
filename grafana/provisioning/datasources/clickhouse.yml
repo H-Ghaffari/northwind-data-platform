@@ -1,16 +1,24 @@
 # ---------------------------------------------------------------------------
-# ClickHouse datasource, provisioned rather than clicked through the UI.
+# ClickHouse datasources, provisioned rather than clicked through the UI.
 #
 # A hand-created datasource lives only in Grafana's own database, so it does
-# not survive a volume reset and cannot be reviewed. Declaring it here makes
-# the connection part of the repository: anyone who starts the stack gets a
-# working datasource with no setup step.
+# not survive a volume reset and cannot be reviewed. Declaring them here makes
+# the connection part of the repository: anyone who starts the stack gets
+# working datasources with no setup step.
+#
+# Two entries, one per warehouse. Both point at the same ClickHouse server
+# and differ only in defaultDatabase, which is what lets a dashboard query
+# unqualified table names and still reach the right side. A single datasource
+# with fully-qualified names in every panel would work too, but then every
+# query would carry the database name and comparing the two paths would mean
+# editing SQL rather than switching a dropdown.
 #
 # Credentials come from the environment, so nothing secret is committed.
 # ---------------------------------------------------------------------------
 apiVersion: 1
 
 datasources:
+  # --- Batch warehouse, loaded by Airflow ---------------------------------
   - name: ClickHouse
     uid: northwind-dw
     type: grafana-clickhouse-datasource
@@ -28,6 +36,25 @@ datasources:
       defaultDatabase: $DW_DB
       # Dashboards refresh every 5 seconds, so a query that has not returned
       # by then is already stale and should be abandoned.
+      dialTimeout: 10
+      queryTimeout: 30
+    secureJsonData:
+      password: $CLICKHOUSE_PASSWORD
+
+  # --- Streaming warehouse, fed by the Kafka consumer ---------------------
+  - name: ClickHouse RT
+    uid: northwind-rt
+    type: grafana-clickhouse-datasource
+    access: proxy
+    isDefault: false
+    editable: false
+    jsonData:
+      host: northwind_dw
+      port: 9000
+      protocol: native
+      secure: false
+      username: $CLICKHOUSE_USER
+      defaultDatabase: $DW_RT_DB
       dialTimeout: 10
       queryTimeout: 30
     secureJsonData:
