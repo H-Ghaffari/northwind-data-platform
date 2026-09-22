@@ -1,0 +1,71 @@
+# ---------------------------------------------------------------------------
+# Packetbeat — network flows as seen from the CDC producer.
+#
+# Runs inside the producer's own network namespace (network_mode in
+# compose), so it sees exactly the producer's traffic without host
+# networking or guessing the name of a Docker bridge interface — which
+# differs between machines and does not exist under Docker Desktop.
+#
+# Flows rather than protocol parsing: Packetbeat has no parser for the
+# Kafka wire protocol or for TDS, SQL Server's. Flows work on any port and
+# answer the question the brief asks — what crosses the wire, where to,
+# and how much.
+# ---------------------------------------------------------------------------
+
+packetbeat.interfaces.device: any
+
+# Only the two conversations the producer exists to have. Without a filter
+# the index fills with Docker DNS lookups and nothing of interest.
+packetbeat.interfaces.bpf_filter: "tcp port 1433 or tcp port 9092"
+
+packetbeat.flows:
+  # A connection idle this long is reported as ended.
+  timeout: 30s
+  # Long-lived connections — Kafka's and SQL Server's both are — report
+  # their running totals at this interval instead of only when they close,
+  # which for a broker connection might be never.
+  period: 10s
+  # Each periodic report carries the connection's running total since it
+  # opened, not the traffic of the last interval. Summing network.bytes
+  # across reports counts the same bytes over and over — a query doing that
+  # reported more traffic after a fix that only removed traffic. Use the
+  # per-flow maximum, or the difference between consecutive reports.
+
+processors:
+  # Label each flow by the service it involves, so a dashboard can group by
+  # a name rather than a port number. Both directions are matched: a
+  # connection established before Packetbeat started has no SYN to show who
+  # initiated it, and Packetbeat may record the broker as the source.
+  - add_fields:
+      when:
+        or:
+          - equals: { destination.port: 9092 }
+          - equals: { source.port: 9092 }
+      target: northwind
+      fields:
+        peer: kafka
+  - add_fields:
+      when:
+        or:
+          - equals: { destination.port: 1433 }
+          - equals: { source.port: 1433 }
+      target: northwind
+      fields:
+        peer: sql-server
+  - add_fields:
+      target: northwind
+      fields:
+        observed_from: cdc_producer
+
+output.elasticsearch:
+  hosts: ["http://elasticsearch:9200"]
+
+# Prebuilt Kibana dashboards are not loaded. Loading them makes Packetbeat
+# query Kibana at startup, and Kibana 9 answers an unauthenticated status
+# request without a version number — which Packetbeat treats as fatal.
+#
+# More to the point, a collector should not refuse to start because the
+# presentation layer is unavailable: a Kibana restart would otherwise stop
+# traffic being recorded for as long as it took. The flows are shown on the
+# project's own Kibana dashboard instead.
+setup.dashboards.enabled: false

@@ -85,7 +85,7 @@ CREATE TABLE IF NOT EXISTS staging_customer
     _loaded_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-/* full_name and age do not exist in the source. They are derived during the
+/* full_name does not exist in the source. It is derived during the
    OP → Staging step — the "New Column" cleaning the brief calls for. */
 CREATE TABLE IF NOT EXISTS staging_employees
 (
@@ -96,7 +96,6 @@ CREATE TABLE IF NOT EXISTS staging_employees
     title             VARCHAR(30),
     title_of_courtesy VARCHAR(25),
     birth_date        TIMESTAMP,
-    age               INTEGER,
     hire_date         TIMESTAMP,
     address           VARCHAR(60),
     city              VARCHAR(15),

@@ -137,7 +137,13 @@ ORDER BY (customer_alternate_key, start_date);
 -- only be filled once every employee row exists. The load is therefore two
 -- passes: insert everyone, then resolve the hierarchy.
 --
--- full_name and age are derived, not sourced.
+-- full_name is derived from the source columns and stored: it changes only
+-- when a name changes, which CDC reports.
+--
+-- age is an ALIAS rather than a stored column. It is a function of today's
+-- date, not of anything the source holds, so a stored value would be
+-- correct on the day it was written and wrong from the next birthday on —
+-- with nothing to correct it, since a birthday is not a change CDC sees.
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS DimEmployees
 (
@@ -152,7 +158,7 @@ CREATE TABLE IF NOT EXISTS DimEmployees
     title                   String,
     title_of_courtesy       String,
     birth_date              Nullable(Date32),
-    age                     UInt8,
+    age                     UInt8 ALIAS toUInt8(dateDiff('year', birth_date, today())),
     hire_date               Nullable(Date32),
     home_phone              String,
     extension               String,
@@ -272,8 +278,13 @@ CREATE VIEW IF NOT EXISTS v_DimCustomer_Current AS
 SELECT * FROM DimCustomer FINAL
 WHERE end_date = toDateTime('2106-01-01 00:00:00');
 
-CREATE VIEW IF NOT EXISTS v_DimEmployees_Current AS
-SELECT * FROM DimEmployees FINAL
+-- age is named explicitly because SELECT * does not return ALIAS columns in
+-- ClickHouse: an alias is an expression, not a stored column, and is only
+-- materialised when asked for. Without this the column would exist on the
+-- table and silently vanish from every view that reads it.
+CREATE OR REPLACE VIEW v_DimEmployees_Current AS
+SELECT *, age
+FROM DimEmployees FINAL
 WHERE end_date = toDateTime('2106-01-01 00:00:00');
 
 CREATE VIEW IF NOT EXISTS v_DimSuppliers_Current AS

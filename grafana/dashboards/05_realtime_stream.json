@@ -1,0 +1,508 @@
+{
+  "uid": "nw-realtime-stream",
+  "title": "Northwind — Real-Time Stream",
+  "description": "What the streaming path is doing right now. The number the near-real-time claim rests on is lag: the gap between SQL Server committing a transaction and the warehouse reflecting it. A continuous flow has no runs to succeed or fail, only a distance from the source, so that distance is what this board measures.",
+  "tags": ["northwind", "streaming", "kafka", "cdc"],
+  "timezone": "browser",
+  "style": "dark",
+  "editable": true,
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "time": { "from": "now-1h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "source",
+        "label": "Capture instance",
+        "type": "query",
+        "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-rt" },
+        "query": "SELECT DISTINCT capture_instance FROM StreamEvents ORDER BY capture_instance",
+        "multi": true,
+        "includeAll": true,
+        "allValue": "%",
+        "current": { "text": ["All"], "value": ["$__all"] },
+        "refresh": 2
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 100,
+      "type": "row",
+      "title": "Latency",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "collapsed": false
+    },
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Average lag",
+      "description": "Mean gap between source commit and warehouse write. Most of it is the producer's polling interval — below that, the delay belongs to SQL Server's own capture job rather than to this pipeline.",
+      "gridPos": { "h": 5, "w": 4, "x": 0, "y": 1 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-rt" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "#73BF69", "value": null },
+              { "color": "#FADE2A", "value": 15000 },
+              { "color": "#F2495C", "value": 60000 }
+            ]
+          },
+          "color": { "mode": "thresholds" }
+        }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "values": false },
+        "textMode": "value_and_name",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT round(avg(lag_ms)) AS \"Avg lag\" FROM StreamEvents WHERE $__timeFilter(event_time) AND capture_instance LIKE '${source:pipe}'"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "p95 lag",
+      "description": "The tail, not the average. A healthy stream has a p95 close to its mean; a large gap means something intermittently stalls.",
+      "gridPos": { "h": 5, "w": 4, "x": 4, "y": 1 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-rt" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "#73BF69", "value": null },
+              { "color": "#FADE2A", "value": 20000 },
+              { "color": "#F2495C", "value": 90000 }
+            ]
+          },
+          "color": { "mode": "thresholds" }
+        }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "values": false },
+        "textMode": "value_and_name",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT round(quantile(0.95)(lag_ms)) AS \"p95\" FROM StreamEvents WHERE $__timeFilter(event_time) AND capture_instance LIKE '${source:pipe}'"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Since last event",
+      "description": "Seconds since anything was applied. Silence is the normal state when nothing changes at the source, so this is context rather than an alarm.",
+      "gridPos": { "h": 5, "w": 4, "x": 8, "y": 1 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-rt" },
+      "fieldConfig": {
+        "defaults": { "unit": "s", "decimals": 0, "color": { "mode": "fixed", "fixedColor": "#5794F2" } }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "values": false },
+        "textMode": "value_and_name",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT toUInt32(dateDiff('second', max(event_time), now())) AS \"Idle\" FROM StreamEvents"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Events",
+      "gridPos": { "h": 5, "w": 4, "x": 12, "y": 1 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-rt" },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "#B877D9" } }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "values": false },
+        "textMode": "value_and_name",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT count() AS \"Events\" FROM StreamEvents WHERE $__timeFilter(event_time) AND capture_instance LIKE '${source:pipe}'"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Rows written",
+      "description": "Higher than the event count, because one type 2 change writes two rows and a header change writes one per line.",
+      "gridPos": { "h": 5, "w": 4, "x": 16, "y": 1 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-rt" },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "#73BF69" } }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "values": false },
+        "textMode": "value_and_name",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT sum(rows_written) AS \"Rows\" FROM StreamEvents WHERE $__timeFilter(event_time) AND capture_instance LIKE '${source:pipe}'"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Errors",
+      "description": "A message that fails keeps its offset and is retried, so a count that climbs means the same message is looping rather than that many messages failed once.",
+      "gridPos": { "h": 5, "w": 4, "x": 20, "y": 1 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-rt" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "#73BF69", "value": null },
+              { "color": "#F2495C", "value": 1 }
+            ]
+          },
+          "color": { "mode": "thresholds" }
+        }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "values": false },
+        "textMode": "value_and_name",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT countIf(error != '') AS \"Errors\" FROM StreamEvents WHERE $__timeFilter(event_time)"
+        }
+      ]
+    },
+
+    {
+      "id": 101,
+      "type": "row",
+      "title": "Over time",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 6 },
+      "collapsed": false
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Lag",
+      "description": "Average and 95th percentile per minute. A rising line means the consumer is falling behind the source — visible here long before a dashboard looks stale.",
+      "gridPos": { "h": 10, "w": 14, "x": 0, "y": 7 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-rt" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 15,
+            "gradientMode": "opacity",
+            "showPoints": "auto",
+            "spanNulls": false
+          }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "p95" },
+            "properties": [
+              { "id": "color", "value": { "mode": "fixed", "fixedColor": "#FF9830" } },
+              { "id": "custom.fillOpacity", "value": 0 },
+              { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [8, 4] } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "avg" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "#5794F2" } }]
+          }
+        ]
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "none" }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT toStartOfMinute(event_time) AS time, round(avg(lag_ms)) AS avg, round(quantile(0.95)(lag_ms)) AS p95 FROM StreamEvents WHERE $__timeFilter(event_time) AND capture_instance LIKE '${source:pipe}' GROUP BY time ORDER BY time"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "piechart",
+      "title": "What the SCD engine decided",
+      "description": "unchanged is the healthy majority: CDC reports every UPDATE, including those that set a column to the value it already held, and the comparison stops them before they reach the warehouse.",
+      "gridPos": { "h": 10, "w": 10, "x": 14, "y": 7 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-rt" },
+      "fieldConfig": {
+        "defaults": { "unit": "short" }
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right", "showLegend": true, "values": ["value", "percent"] },
+        "pieType": "donut",
+        "displayLabels": ["percent"],
+        "reduceOptions": { "calcs": ["lastNotNull"], "values": true }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT scd_outcome AS outcome, count() AS events FROM StreamEvents WHERE $__timeFilter(event_time) AND capture_instance LIKE '${source:pipe}' GROUP BY outcome ORDER BY events DESC"
+        }
+      ]
+    },
+
+    {
+      "id": 102,
+      "type": "row",
+      "title": "Per source",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 17 },
+      "collapsed": false
+    },
+    {
+      "id": 20,
+      "type": "table",
+      "title": "Stream health",
+      "description": "Reads v_StreamHealth rather than aggregating here, so the definition of healthy lives in git and not in a dashboard JSON.",
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 18 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-rt" },
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "auto" } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "avg_lag_ms" },
+            "properties": [
+              { "id": "unit", "value": "ms" },
+              { "id": "custom.cellOptions", "value": { "type": "gauge", "mode": "gradient" } },
+              { "id": "color", "value": { "mode": "continuous-GrYlRd" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "p95_lag_ms" },
+            "properties": [{ "id": "unit", "value": "ms" }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "max_lag_ms" },
+            "properties": [{ "id": "unit", "value": "ms" }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "errors" },
+            "properties": [
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    { "color": "text", "value": null },
+                    { "color": "#F2495C", "value": 1 }
+                  ]
+                }
+              },
+              { "id": "custom.cellOptions", "value": { "type": "color-text" } }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "footer": { "show": true, "reducer": ["sum"], "fields": ["events", "rows_written"] },
+        "sortBy": [{ "displayName": "events", "desc": true }]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT * FROM v_StreamHealth"
+        }
+      ]
+    },
+    {
+      "id": 21,
+      "type": "table",
+      "title": "Live feed",
+      "description": "The last thirty events, newest first. On a five-second refresh, a change made in SQL Server appears here within a poll interval.",
+      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 27 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-rt" },
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "auto" } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "lag_ms" },
+            "properties": [{ "id": "unit", "value": "ms" }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "outcome" },
+            "properties": [{ "id": "custom.cellOptions", "value": { "type": "color-text" } }]
+          }
+        ]
+      },
+      "options": { "showHeader": true },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT formatDateTime(event_time, '%H:%i:%S') AS at, replaceOne(capture_instance, 'dbo_', '') AS source, business_key AS key, operation, scd_outcome AS outcome, rows_written AS rows, lag_ms FROM StreamEvents WHERE capture_instance LIKE '${source:pipe}' ORDER BY event_time DESC LIMIT 30"
+        }
+      ]
+    },
+
+    {
+      "id": 103,
+      "type": "row",
+      "title": "Integrity",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 39 },
+      "collapsed": true,
+      "panels": [
+        {
+          "id": 30,
+          "type": "stat",
+          "title": "Inferred members",
+          "description": "Stub dimension rows created by the fact load when a fact arrived before its dimension. A number that keeps climbing means the dimension side is not keeping up — and someone will eventually notice blank labels on a chart.",
+          "gridPos": { "h": 5, "w": 6, "x": 0, "y": 40 },
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-rt" },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "#73BF69", "value": null },
+                  { "color": "#FADE2A", "value": 1 },
+                  { "color": "#F2495C", "value": 20 }
+                ]
+              },
+              "color": { "mode": "thresholds" }
+            }
+          },
+          "options": {
+            "reduceOptions": { "calcs": ["lastNotNull"], "values": false },
+            "textMode": "value_and_name",
+            "graphMode": "none"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "format": 1,
+              "queryType": "sql",
+              "rawSql": "SELECT (SELECT count() FROM v_DimCustomer_Current WHERE company_name = '') + (SELECT count() FROM v_DimProducts_Current WHERE product_name = '') + (SELECT count() FROM v_DimEmployees_Current WHERE full_name = '') AS \"Stubs\""
+            }
+          ]
+        },
+        {
+          "id": 31,
+          "type": "stat",
+          "title": "Unresolved keys",
+          "description": "Fact rows pointing at key 0. An address absent from DimGeography resolves to 0 rather than dropping the row — visible, and better than a lost order.",
+          "gridPos": { "h": 5, "w": 6, "x": 6, "y": 40 },
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-rt" },
+          "fieldConfig": {
+            "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "#FF9830" } }
+          },
+          "options": {
+            "reduceOptions": { "calcs": ["lastNotNull"], "values": false },
+            "textMode": "value_and_name",
+            "graphMode": "none"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "format": 1,
+              "queryType": "sql",
+              "rawSql": "SELECT countIf(product_key = 0 OR customer_key = 0 OR employee_key = 0) AS \"Unresolved\" FROM v_FactOrders_Current"
+            }
+          ]
+        },
+        {
+          "id": 32,
+          "type": "stat",
+          "title": "Tombstoned",
+          "description": "Deletes are inserts carrying is_deleted = 1 rather than DELETE statements: a ClickHouse mutation rewrites whole partitions, and a tombstone keeps the deletion auditable.",
+          "gridPos": { "h": 5, "w": 6, "x": 12, "y": 40 },
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-rt" },
+          "fieldConfig": {
+            "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "#B877D9" } }
+          },
+          "options": {
+            "reduceOptions": { "calcs": ["lastNotNull"], "values": false },
+            "textMode": "value_and_name",
+            "graphMode": "none"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "format": 1,
+              "queryType": "sql",
+              "rawSql": "SELECT count() AS \"Tombstoned\" FROM FactOrders FINAL WHERE is_deleted = 1"
+            }
+          ]
+        },
+        {
+          "id": 33,
+          "type": "stat",
+          "title": "Headers cached",
+          "description": "RtOrderHeaders: the consumer's working memory, where a header waits for lines that have not arrived. A seven-day TTL keeps it from growing without bound.",
+          "gridPos": { "h": 5, "w": 6, "x": 18, "y": 40 },
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "northwind-rt" },
+          "fieldConfig": {
+            "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "#FADE2A" } }
+          },
+          "options": {
+            "reduceOptions": { "calcs": ["lastNotNull"], "values": false },
+            "textMode": "value_and_name",
+            "graphMode": "none"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "format": 1,
+              "queryType": "sql",
+              "rawSql": "SELECT count() AS \"Headers\" FROM RtOrderHeaders FINAL"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
